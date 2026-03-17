@@ -15,7 +15,6 @@
 - 🔧 **Bootstrap агента** — автоматический деплой агента на роутер по SSH
 - 🔐 **JWT авторизация** — bcrypt, управление пользователями
 - 📱 **Android APK** — нативный экран логина (Kotlin + Jetpack Compose) + WebView UI
-- 🤖 **Telegram-бот** — выдача WireGuard ключей
 
 ---
 
