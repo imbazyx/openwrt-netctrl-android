@@ -1,0 +1,6 @@
+owm-ui/node_modules/
+owm-ui/dist/
+owm-ui/.env
+target/
+*.db
+.local/
