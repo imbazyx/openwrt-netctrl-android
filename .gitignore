@@ -1,2 +1,15 @@
-netctrl-release.jks
+# Build
+app/build/
+build/
+.gradle/
+
+# Android secrets
 local.properties
+*.jks
+*.keystore
+keystore.properties
+
+# Binary server/agent files (в Releases, не в репо)
+owm-agent-*
+owm-server-*
+ico.png
