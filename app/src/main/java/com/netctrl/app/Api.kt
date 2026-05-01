@@ -60,7 +60,71 @@ data class ApiResponse<T>(
     val data: T?
 )
 
+// ─── H3363T Models ───
+
+data class H3363tNodeStatus(
+    val pubkey: String,
+    val trust_level: Int,
+    val peer_count: Int,
+    val feed_size: Long,
+    val uptime_sec: Long,
+    val osiis_active: Boolean,
+    val last_sync: Long,
+    val updated_at: String
+)
+
+data class H3363tEvent(
+    val event_type: String,
+    val node_pubkey: String,
+    val payload: Map<String, Any?>,
+    val timestamp: Long
+)
+
+data class H3363tCommandRequest(
+    val command: String,
+    val port: Int? = null,
+    val rule: String? = null,
+    val config: Map<String, Any?>? = null
+)
+
+data class H3363tCommandResponse(
+    val success: Boolean,
+    val message: String,
+    val data: Map<String, Any?>? = null
+)
+
+data class AdminInfo(
+    val username: String,
+    val role: String
+)
+
+data class CreateAdminRequest(
+    val username: String,
+    val password: String,
+    val role: String = "admin"
+)
+
+data class ChangePasswordRequest(val new_password: String)
+
+data class CreateAgentRequest(
+    val agent_id: String? = null,
+    val display_name: String? = null,
+    val local_ip: String? = null,
+    val luci_url: String? = null,
+    val lat: Double? = null,
+    val lng: Double? = null,
+    val description: String? = null,
+    val address: String? = null,
+    val ssh_host: String? = null,
+    val ssh_port: Int? = null,
+    val ssh_user: String? = null,
+    val ssh_password: String? = null
+)
+
 interface NetCtrlApi {
+    @GET("health")
+    suspend fun health(): Map<String, String>
+
     @POST("auth/login")
     suspend fun login(@Body req: LoginRequest): LoginResponse
 
@@ -76,10 +140,77 @@ interface NetCtrlApi {
         @Header("Authorization") bearer: String,
         @Query("limit") limit: Int = 1
     ): ApiResponse<List<Metric>>
+
+    // ─── H3363T Endpoints ───
+
+    @GET("api/v1/h3363t/status")
+    suspend fun h3363tStatus(
+        @Header("Authorization") bearer: String
+    ): ApiResponse<List<H3363tNodeStatus>>
+
+    @GET("api/v1/h3363t/status/{pubkey}")
+    suspend fun h3363tNodeStatus(
+        @Path("pubkey") pubkey: String,
+        @Header("Authorization") bearer: String
+    ): ApiResponse<H3363tNodeStatus>
+
+    @POST("api/v1/h3363t/command")
+    suspend fun h3363tCommand(
+        @Header("Authorization") bearer: String,
+        @Body req: H3363tCommandRequest
+    ): H3363tCommandResponse
+
+    @GET("api/v1/h3363t/events")
+    suspend fun h3363tEvents(
+        @Header("Authorization") bearer: String
+    ): ApiResponse<List<H3363tEvent>>
+
+    @GET("api/v1/h3363t/mapping")
+    suspend fun h3363tMapping(
+        @Header("Authorization") bearer: String
+    ): ApiResponse<List<Map<String, String>>>
+
+    @GET("api/v1/admins")
+    suspend fun listAdmins(
+        @Header("Authorization") bearer: String
+    ): ApiResponse<List<AdminInfo>>
+
+    @POST("api/v1/admins")
+    suspend fun createAdmin(
+        @Header("Authorization") bearer: String,
+        @Body req: CreateAdminRequest
+    ): ApiResponse<Unit?>
+
+    @DELETE("api/v1/admins/{username}")
+    suspend fun deleteAdmin(
+        @Header("Authorization") bearer: String,
+        @Path("username") username: String
+    ): ApiResponse<Unit?>
+
+    @PUT("api/v1/admins/me/password")
+    suspend fun changePassword(
+        @Header("Authorization") bearer: String,
+        @Body req: ChangePasswordRequest
+    ): ApiResponse<Unit?>
+
+    @POST("api/v1/agents")
+    suspend fun createAgent(
+        @Header("Authorization") bearer: String,
+        @Body req: CreateAgentRequest
+    ): ApiResponse<Map<String, String>>
+
+    @DELETE("api/v1/agents/{id}")
+    suspend fun deleteAgent(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: String
+    ): ApiResponse<Unit?>
 }
 
 fun buildApi(baseUrl: String): NetCtrlApi {
     val client = OkHttpClient.Builder()
+        .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
         .addInterceptor(HttpLoggingInterceptor().apply {
             level = HttpLoggingInterceptor.Level.BASIC
         })
