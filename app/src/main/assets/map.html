@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #050410; }
+#map { width: 100vw; height: 100vh; }
+.leaflet-popup-content-wrapper { background: #0D0B1E; color: #C0B0F0; border: 1px solid #2A2250; border-radius: 8px; }
+.leaflet-popup-tip { background: #0D0B1E; }
+.leaflet-popup-close-button { color: #8B949E !important; }
+.popup-btn { background: #7050C8; color: white; border: none; padding: 5px 14px; border-radius: 5px; cursor: pointer; margin-top: 8px; font-size: 13px; }
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+</head>
+<body>
+<div id="map"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+const PARAMS = new URLSearchParams(window.location.search);
+const MODE = PARAMS.get('mode') || 'view';
+
+const map = L.map('map', { center: [55.75, 37.62], zoom: 5 });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+function makeIcon(online) {
+  const color = online ? '#3FB950' : '#F85149';
+  return L.divIcon({
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,0.5)"></div>`,
+    iconSize: [14, 14], iconAnchor: [7, 7], className: ''
+  });
+}
+
+var markers = {};
+
+window.setAgents = function(json) {
+  var agents = (typeof json === 'string') ? JSON.parse(json) : json;
+  Object.values(markers).forEach(m => map.removeLayer(m));
+  markers = {};
+  agents.forEach(function(a) {
+    if (a.lat == null || a.lng == null) return;
+    var m = L.marker([a.lat, a.lng], { icon: makeIcon(a.online) });
+    var name = a.display_name || a.agent_id;
+    var status = a.online ? '<span style="color:#3FB950">Online</span>' : '<span style="color:#F85149">Offline</span>';
+    m.bindPopup(
+      '<b style="color:#E6EDF3">' + name + '</b><br>' + status +
+      (a.address ? '<br><span style="color:#8B949E;font-size:12px">' + a.address + '</span>' : '') +
+      (a.local_ip ? '<br><span style="color:#8B949E;font-size:12px">' + a.local_ip + '</span>' : '') +
+      '<br><button class="popup-btn" onclick="if(window.AndroidBridge)AndroidBridge.onAgentClick(\'' + a.agent_id + '\')">Подробнее</button>'
+    );
+    m.addTo(map);
+    markers[a.agent_id] = m;
+  });
+};
+
+window.fitBounds = function() {
+  var ml = Object.values(markers);
+  if (ml.length > 0) { try { map.fitBounds(L.featureGroup(ml).getBounds().pad(0.15)); } catch(e){} }
+};
+
+window.refreshAgents = function() {
+  if (window.AndroidBridge) {
+    window.setAgents(AndroidBridge.getAgentsJson());
+    window.fitBounds();
+  }
+};
+
+if (MODE === 'pick') {
+  var pickMarker = null;
+  map.on('click', function(e) {
+    if (pickMarker) map.removeLayer(pickMarker);
+    pickMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
+    if (window.AndroidBridge) AndroidBridge.onLocationPicked(e.latlng.lat, e.latlng.lng);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.AndroidBridge) {
+    window.setAgents(AndroidBridge.getAgentsJson());
+    window.fitBounds();
+  }
+  setInterval(window.refreshAgents, 30000);
+});
+</script>
+</body>
+</html>

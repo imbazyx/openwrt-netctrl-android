@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #050410; overflow: hidden; }
+#terminal { width: 100vw; height: 100vh; }
+.xterm-viewport { background: #050410 !important; }
+</style>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.css">
+</head>
+<body>
+<div id="terminal"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/xterm.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/5.3.0/addon-fit.min.js"></script>
+<script>
+const PARAMS = new URLSearchParams(window.location.search);
+const SERVER = PARAMS.get('server') || '';
+const AGENT_ID = PARAMS.get('agent_id') || '';
+const TOKEN = PARAMS.get('token') || '';
+
+const term = new Terminal({
+  theme: {
+    background: '#050410', foreground: '#C0B0F0',
+    cursor: '#7050C8', selection: '#3030A080'
+  },
+  fontFamily: '"Courier New", Courier, monospace',
+  fontSize: 14, cursorBlink: true, scrollback: 1000
+});
+
+const fitAddon = new FitAddon.FitAddon();
+term.loadAddon(fitAddon);
+term.open(document.getElementById('terminal'));
+fitAddon.fit();
+window.addEventListener('resize', () => fitAddon.fit());
+
+let ws = null;
+
+function connect() {
+  if (!SERVER || !AGENT_ID) {
+    term.write('\r\n\x1b[33mNo server/agent configured\x1b[0m\r\n');
+    return;
+  }
+  const wsServer = SERVER.replace(/^http:\/\//, 'ws://').replace(/^https:\/\//, 'wss://');
+  const url = wsServer + '/api/v1/ssh/ws/' + AGENT_ID + '?token=' + encodeURIComponent(TOKEN);
+  term.write('\r\nConnecting to \x1b[36m' + AGENT_ID + '\x1b[0m...\r\n');
+  ws = new WebSocket(url);
+
+  ws.onopen = function() { term.write('\x1b[32mConnected\x1b[0m\r\n'); };
+  ws.onmessage = function(e) { term.write(e.data); };
+  ws.onclose = function() { term.write('\r\n\x1b[31m[Disconnected]\x1b[0m\r\n'); };
+  ws.onerror = function() { term.write('\r\n\x1b[31m[Connection error]\x1b[0m\r\n'); };
+}
+
+term.onData(function(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(data);
+});
+
+connect();
+</script>
+</body>
+</html>
