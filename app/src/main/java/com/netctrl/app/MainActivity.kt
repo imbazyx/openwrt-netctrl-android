@@ -15,6 +15,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,16 +25,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.*
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.launch
 
-// --- Цвета ---
-val BgDark = Color(0xFF0D1117)
-val CardBg = Color(0xFF161B22)
-val AccentBlue = Color(0xFF238636).copy(red = 0.13f, green = 0.52f, blue = 0.96f)
+// ─── VOID Color Scheme ─────────────────────────────────────────────────────
+val BgDark      = Color(0xFF050410)
+val CardBg      = Color(0xFF0D0B1E)
+val AccentVoid  = Color(0xFF7050C8)
 val AccentGreen = Color(0xFF238636)
 val TextPrimary = Color(0xFFE6EDF3)
 val TextSecondary = Color(0xFF8B949E)
 val OnlineGreen = Color(0xFF3FB950)
-val OfflineRed = Color(0xFFF85149)
+val OfflineRed  = Color(0xFFF85149)
+val TrustGold   = Color(0xFFE3B341)
+val H3363tPurple = Color(0xFF9E6AFF)
+val DividerColor = Color(0xFF1E1A35)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -47,16 +52,48 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
     val ui by vm.ui.collectAsState()
     MaterialTheme(colorScheme = darkColorScheme(
         background = BgDark, surface = CardBg,
-        primary = AccentBlue, onBackground = TextPrimary
+        primary = AccentVoid, onBackground = TextPrimary
     )) {
-        when {
-            ui.screen is Screen.Login -> LoginScreen(ui, vm::login)
-            else -> MainWebScreen(
+        when (val screen = ui.screen) {
+            is Screen.Login    -> LoginScreen(ui, vm::login)
+            is Screen.Detail   -> DetailScreen(
+                agent = screen.agent, metrics = ui.detailMetrics,
+                onBack = { vm.closeDetail() },
+                onOpenTerminal = { type -> vm.openAgentWeb(screen.agent, type) }
+            )
+            is Screen.SshTerminal -> SshTerminalScreen(
+                agent = screen.agent,
                 serverUrl = ui.serverUrl,
                 token = ui.token,
-                username = ui.username,
-                onLogout = { vm.logout() }
+                onBack = { vm.navigateTo(Screen.Dashboard) }
             )
+            is Screen.LuciView -> LuciViewScreen(
+                agent = screen.agent,
+                onBack = { vm.navigateTo(Screen.Dashboard) }
+            )
+            is Screen.H3363TNode -> H3363TScreen(
+                nodes = ui.h3363tNodes, events = ui.h3363tEvents,
+                loading = ui.h3363tLoading, error = ui.h3363tError,
+                connected = ui.h3363tConnected, commandResult = ui.h3363tCommandResult,
+                onRefresh = { vm.loadH3363tData() },
+                onCommand = { cmd, port, rule -> vm.sendH3363tCommand(cmd, port, rule) },
+                onClearResult = { vm.clearCommandResult() },
+                onBack = { vm.navigateTo(Screen.Dashboard) }
+            )
+            is Screen.LocalNode -> LocalNodeScreen(
+                connected = ui.localNodeConnected, peerCount = ui.localNodePeerCount,
+                loading = ui.localNodeLoading,
+                onRefresh = { vm.refreshLocalNode() },
+                onBack = { vm.navigateTo(Screen.Dashboard) }
+            )
+            is Screen.Settings -> SettingsScreen(
+                serverUrl = ui.serverUrl, username = ui.username,
+                onSave = { url -> vm.updateServerUrl(url) },
+                onLogout = { vm.logout() },
+                onBack = { vm.navigateTo(Screen.Dashboard) }
+            )
+            is Screen.Web -> MainWebScreen(serverUrl = screen.url, token = ui.token, username = ui.username, onLogout = { vm.logout() })
+            else -> MainTabScaffold(ui = ui, vm = vm)
         }
     }
 }
@@ -65,7 +102,7 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
 
 @Composable
 fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
-    var url by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("http://95.174.102.25:9090") }
     var user by remember { mutableStateOf("admin") }
     var pass by remember { mutableStateOf("") }
     var passVisible by remember { mutableStateOf(false) }
@@ -76,22 +113,23 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Text("NetCtrl", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-            Text("OpenWRT Management", color = TextSecondary, fontSize = 14.sp)
+            // Logo / brand
+            Text("H3363T", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = AccentVoid)
+            Text("NetCtrl", color = TextSecondary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
             Spacer(Modifier.height(8.dp))
 
             OutlinedTextField(
                 value = url, onValueChange = { url = it },
                 label = { Text("Server URL") },
                 modifier = Modifier.fillMaxWidth(),
-                colors = outlinedTextFieldColors(),
+                colors = customOutlinedColors(),
                 singleLine = true
             )
             OutlinedTextField(
                 value = user, onValueChange = { user = it },
                 label = { Text("Username") },
                 modifier = Modifier.fillMaxWidth(),
-                colors = outlinedTextFieldColors(),
+                colors = customOutlinedColors(),
                 singleLine = true
             )
             OutlinedTextField(
@@ -106,7 +144,7 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
                             color = TextSecondary, fontSize = 12.sp)
                     }
                 },
-                colors = outlinedTextFieldColors(),
+                colors = customOutlinedColors(),
                 singleLine = true
             )
 
@@ -117,47 +155,71 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
                 onClick = { onLogin(url, user, pass) },
                 modifier = Modifier.fillMaxWidth().height(50.dp),
                 enabled = !ui.loading,
-                colors = ButtonDefaults.buttonColors(containerColor = AccentBlue)
+                colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
             ) {
                 if (ui.loading) CircularProgressIndicator(Modifier.size(20.dp), color = Color.White)
-                else Text("Войти", fontWeight = FontWeight.SemiBold)
+                else Text("Подключиться", fontWeight = FontWeight.SemiBold)
             }
         }
     }
 }
 
-// ─── DASHBOARD ───────────────────────────────────────────────────────────────
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DashboardScreen(ui: UiState, onRefresh: () -> Unit, onLogout: () -> Unit, vm: MainViewModel) {
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("NetCtrl", fontWeight = FontWeight.Bold, color = TextPrimary) },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg),
-                actions = {
-                    IconButton(onRefresh) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
-                    IconButton(onLogout) { Icon(Icons.Default.ExitToApp, null, tint = TextSecondary) }
-                }
-            )
-        },
-        containerColor = BgDark
-    ) { pad ->
+fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    LazyColumn(
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            ServerStatusCard(ui)
+        }
         if (ui.agents.isEmpty()) {
-            Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
-                Text("Нет роутеров", color = TextSecondary)
+            item {
+                Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(Icons.Outlined.Router, null, tint = TextSecondary, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(8.dp))
+                        Text("Нет зарегистрированных агентов", color = TextSecondary, fontSize = 14.sp)
+                    }
+                }
             }
         } else {
-            LazyColumn(
-                Modifier.fillMaxSize().padding(pad),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                items(ui.agents) { agent ->
-                    AgentCard(agent, onClick = { vm.selectAgent(agent) })
-                }
+            items(ui.agents) { agent ->
+                AgentCard(agent, onClick = { vm.openDetail(agent) })
             }
+        }
+    }
+}
+
+@Composable
+fun ServerStatusCard(ui: UiState) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                Modifier.size(10.dp).background(
+                    if (ui.serverHealthOk) OnlineGreen else OfflineRed,
+                    RoundedCornerShape(50)
+                )
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    if (ui.serverHealthOk) "OWM Server Online" else "OWM Server Offline",
+                    color = if (ui.serverHealthOk) OnlineGreen else OfflineRed,
+                    fontWeight = FontWeight.SemiBold, fontSize = 14.sp
+                )
+                Text(ui.serverUrl.ifBlank { "Не настроен" }, color = TextSecondary, fontSize = 11.sp)
+            }
+            Text("${ui.agents.size} агентов", color = TextSecondary, fontSize = 12.sp)
         }
     }
 }
@@ -188,20 +250,18 @@ fun AgentCard(a: AgentFull, onClick: () -> Unit = {}) {
                     color = if (a.online) OnlineGreen else OfflineRed, fontSize = 12.sp
                 )
             }
-            if (a.address != null)
-                Text(a.address, color = TextSecondary, fontSize = 12.sp)
-            if (a.local_ip != null)
-                Text(a.local_ip, color = TextSecondary, fontSize = 11.sp)
+            if (a.address != null) Text(a.address, color = TextSecondary, fontSize = 12.sp)
+            if (a.local_ip != null) Text(a.local_ip, color = TextSecondary, fontSize = 11.sp)
 
             if (a.online && a.metric != null) {
-                Divider(color = Color(0xFF30363D))
+                HorizontalDivider(color = DividerColor)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                     StatItem("Load", "%.2f".format(a.metric.load1))
                     StatItem("RAM", memPercent(a.metric.mem_free, a.metric.mem_total))
                     StatItem("Temp", a.metric.temperature?.let { "%.0f°".format(it) } ?: "—")
                     StatItem("WiFi", a.metric.wifi_clients?.toString() ?: "—")
                 }
-                Divider(color = Color(0xFF30363D))
+                HorizontalDivider(color = DividerColor)
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                     StatItem("Uptime", formatUptime(a.metric.uptime))
                     StatItem("WAN↓", formatBytes(a.metric.wan_rx))
@@ -210,79 +270,702 @@ fun AgentCard(a: AgentFull, onClick: () -> Unit = {}) {
             } else if (!a.online) {
                 val secs = a.last_seen_secs
                 if (secs != null)
-                    Text("Был онлайн: ${formatAgo(secs)} назад",
-                        color = TextSecondary, fontSize = 11.sp)
+                    Text("Был онлайн: ${formatAgo(secs)} назад", color = TextSecondary, fontSize = 11.sp)
+            }
+        }
+    }
+}
+
+// ─── MAIN TAB SCAFFOLD ───────────────────────────────────────────────────────
+
+@Composable
+fun navItemColors() = NavigationBarItemDefaults.colors(
+    selectedIconColor = AccentVoid,
+    selectedTextColor = AccentVoid,
+    unselectedIconColor = TextSecondary,
+    unselectedTextColor = TextSecondary,
+    indicatorColor = Color(0xFF1E1A35)
+)
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
+    val screen = ui.screen
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("H3363T NetCtrl", fontWeight = FontWeight.Bold, color = TextPrimary)
+                        if (ui.serverHealthOk) {
+                            Spacer(Modifier.width(8.dp))
+                            Box(Modifier.size(7.dp).background(OnlineGreen, RoundedCornerShape(50)))
+                        }
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg),
+                actions = {
+                    IconButton({ vm.refresh() }) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
+                    IconButton({ vm.navigateTo(Screen.Settings) }) { Icon(Icons.Default.Settings, null, tint = TextSecondary) }
+                }
+            )
+        },
+        bottomBar = {
+            NavigationBar(containerColor = CardBg, tonalElevation = 0.dp) {
+                NavigationBarItem(
+                    selected = screen is Screen.Dashboard,
+                    onClick = { vm.navigateTo(Screen.Dashboard) },
+                    icon = { Icon(Icons.Outlined.Router, null) },
+                    label = { Text("Роутеры", fontSize = 11.sp) },
+                    colors = navItemColors()
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Map,
+                    onClick = { vm.navigateTo(Screen.Map) },
+                    icon = { Icon(Icons.Outlined.Place, null) },
+                    label = { Text("Карта", fontSize = 11.sp) },
+                    colors = navItemColors()
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Ssh,
+                    onClick = { vm.navigateTo(Screen.Ssh) },
+                    icon = { Icon(Icons.Outlined.Code, null) },
+                    label = { Text("SSH", fontSize = 11.sp) },
+                    colors = navItemColors()
+                )
+                NavigationBarItem(
+                    selected = screen is Screen.Metrics,
+                    onClick = { vm.navigateTo(Screen.Metrics) },
+                    icon = { Icon(Icons.Outlined.ShowChart, null) },
+                    label = { Text("Метрики", fontSize = 11.sp) },
+                    colors = navItemColors()
+                )
+                if (ui.isSuperAdmin) {
+                    NavigationBarItem(
+                        selected = screen is Screen.Admin,
+                        onClick = { vm.navigateTo(Screen.Admin) },
+                        icon = { Icon(Icons.Outlined.ManageAccounts, null) },
+                        label = { Text("Админ", fontSize = 11.sp) },
+                        colors = navItemColors()
+                    )
+                }
+            }
+        },
+        containerColor = BgDark
+    ) { pad ->
+        when (screen) {
+            is Screen.Map     -> MapTabContent(ui, vm, pad)
+            is Screen.Ssh     -> SshTabContent(ui, vm, pad)
+            is Screen.Metrics -> MetricsTabContent(ui, vm, pad)
+            is Screen.Admin   -> AdminTabContent(ui, vm, pad)
+            else              -> RouterListTab(ui, vm, pad)
+        }
+    }
+}
+
+// ─── MAP TAB ──────────────────────────────────────────────────────────────────
+
+class MapBridge(private val vm: MainViewModel) {
+    @android.webkit.JavascriptInterface
+    fun getAgentsJson(): String {
+        val agents = vm.ui.value.agents
+        return try {
+            org.json.JSONArray(agents.map { a ->
+                org.json.JSONObject().apply {
+                    put("agent_id", a.agent_id)
+                    put("display_name", a.display_name ?: a.agent_id)
+                    put("online", a.online)
+                    put("address", a.address ?: "")
+                    put("local_ip", a.local_ip ?: "")
+                    a.lat?.let { put("lat", it) } ?: put("lat", org.json.JSONObject.NULL)
+                    a.lng?.let { put("lng", it) } ?: put("lng", org.json.JSONObject.NULL)
+                }
+            }).toString()
+        } catch (_: Exception) { "[]" }
+    }
+
+    @android.webkit.JavascriptInterface
+    fun onAgentClick(agentId: String) {
+        val agent = vm.ui.value.agents.find { it.agent_id == agentId } ?: return
+        kotlinx.coroutines.MainScope().launch { vm.openDetail(agent) }
+    }
+
+    @android.webkit.JavascriptInterface
+    fun onLocationPicked(lat: Double, lng: Double) {
+        vm.setPickedLocation(lat, lng)
+    }
+}
+
+@Composable
+fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    val agentsSnapshot = ui.agents
+
+    LaunchedEffect(agentsSnapshot) {
+        webViewRef?.evaluateJavascript("refreshAgents();", null)
+    }
+
+    Box(Modifier.fillMaxSize().padding(pad)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    addJavascriptInterface(MapBridge(vm), "AndroidBridge")
+                    webViewClient = android.webkit.WebViewClient()
+                    webChromeClient = android.webkit.WebChromeClient()
+                    webViewRef = this
+                    loadUrl("file:///android_asset/map.html?mode=view")
+                }
+            }
+        )
+        FloatingActionButton(
+            onClick = { },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            containerColor = AccentVoid
+        ) { Icon(Icons.Default.Add, null, tint = Color.White) }
+    }
+}
+
+// ─── SSH TAB ──────────────────────────────────────────────────────────────────
+
+@Composable
+fun SshTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    var selectedAgent by remember { mutableStateOf<AgentFull?>(null) }
+
+    if (selectedAgent != null) {
+        SshTerminalView(
+            agent = selectedAgent!!,
+            serverUrl = ui.serverUrl,
+            token = ui.token,
+            onClose = { selectedAgent = null }
+        )
+        return
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Text("Выберите роутер для SSH", color = TextPrimary,
+                fontWeight = FontWeight.SemiBold, fontSize = 16.sp)
+        }
+        if (ui.agents.isEmpty()) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("Нет доступных агентов", color = TextSecondary)
+                }
+            }
+        } else {
+            items(ui.agents) { agent ->
+                AgentCard(agent, onClick = { if (agent.online) selectedAgent = agent })
             }
         }
     }
 }
 
 @Composable
-fun StatItem(label: String, value: String) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(value, color = TextPrimary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
-        Text(label, color = TextSecondary, fontSize = 11.sp)
+fun SshTerminalView(
+    agent: AgentFull,
+    serverUrl: String,
+    token: String,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val wsBase = serverUrl.replace(Regex("^http://"), "ws://").replace(Regex("^https://"), "wss://")
+    val url = "file:///android_asset/terminal.html" +
+        "?server=${android.net.Uri.encode(wsBase)}" +
+        "&agent_id=${android.net.Uri.encode(agent.agent_id)}" +
+        "&token=${android.net.Uri.encode(token)}"
+
+    Box(modifier.fillMaxSize()) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    webViewClient = android.webkit.WebViewClient()
+                    webChromeClient = android.webkit.WebChromeClient()
+                    loadUrl(url)
+                }
+            }
+        )
+        Box(
+            Modifier.align(Alignment.TopStart).padding(8.dp)
+                .background(CardBg.copy(alpha = 0.85f), RoundedCornerShape(50))
+        ) {
+            IconButton(onClose) { Icon(Icons.Default.ArrowBack, null, tint = TextPrimary) }
+        }
     }
 }
-
-fun memPercent(free: Long?, total: Long?): String {
-    if (free == null || total == null || total == 0L) return "—"
-    val used = (total - free).toDouble() / total * 100
-    return "%.0f%%".format(used)
-}
-
-fun formatUptime(secs: Double): String {
-    val s = secs.toLong()
-    return when {
-        s < 3600 -> "${s/60}м"
-        s < 86400 -> "${s/3600}ч"
-        else -> "${s/86400}д"
-    }
-}
-
-fun formatBytes(bytes: Long?): String {
-    if (bytes == null) return "—"
-    return when {
-        bytes < 1024 -> "${bytes}B"
-        bytes < 1048576 -> "${bytes/1024}K"
-        bytes < 1073741824 -> "${bytes/1048576}M"
-        else -> "%.1fG".format(bytes/1073741824.0)
-    }
-}
-
-fun formatAgo(secs: Long): String = when {
-    secs < 60 -> "${secs}с"
-    secs < 3600 -> "${secs/60}м"
-    else -> "${secs/3600}ч"
-}
-
-@Composable
-fun outlinedTextFieldColors() = OutlinedTextFieldDefaults.colors(
-    focusedBorderColor = AccentBlue,
-    unfocusedBorderColor = Color(0xFF30363D),
-    focusedLabelColor = AccentBlue,
-    unfocusedLabelColor = TextSecondary,
-    focusedTextColor = TextPrimary,
-    unfocusedTextColor = TextPrimary,
-    cursorColor = AccentBlue
-)
-
-// ─── DETAIL SCREEN ───────────────────────────────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, onOpenTerminal: (String) -> Unit = {}) {
+fun SshTerminalScreen(agent: AgentFull, serverUrl: String, token: String, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("SSH — ${agent.display_name ?: agent.agent_id}", color = TextPrimary) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        SshTerminalView(agent = agent, serverUrl = serverUrl, token = token,
+            onClose = onBack, modifier = Modifier.padding(pad))
+    }
+}
+
+// ─── LUCI VIEW ────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LuciViewScreen(agent: AgentFull, onBack: () -> Unit) {
+    val luciUrl = agent.luci_url ?: "http://${agent.local_ip ?: "192.168.1.1"}"
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("LuCI — ${agent.display_name ?: agent.agent_id}", color = TextPrimary) },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        AndroidView(
+            modifier = Modifier.fillMaxSize().padding(pad),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
+                    webViewClient = android.webkit.WebViewClient()
+                    webChromeClient = android.webkit.WebChromeClient()
+                    loadUrl(luciUrl)
+                }
+            }
+        )
+    }
+}
+
+// ─── METRICS TAB ──────────────────────────────────────────────────────────────
+
+@Composable
+fun MetricsTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    var selectedAgentId by remember { mutableStateOf("") }
+    var timeRange by remember { mutableStateOf(1) }
+    var dropdownExpanded by remember { mutableStateOf(false) }
+
+    LaunchedEffect(ui.agents) {
+        if (selectedAgentId.isEmpty() && ui.agents.isNotEmpty()) {
+            selectedAgentId = ui.agents.first().agent_id
+            vm.loadMetrics(selectedAgentId, timeRange)
+        }
+    }
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        item {
+            Box {
+                OutlinedTextField(
+                    value = ui.agents.find { it.agent_id == selectedAgentId }
+                        ?.let { it.display_name ?: it.agent_id } ?: "Выберите роутер",
+                    onValueChange = {},
+                    label = { Text("Роутер") },
+                    modifier = Modifier.fillMaxWidth().clickable { dropdownExpanded = true },
+                    enabled = false,
+                    colors = customOutlinedColors(),
+                    trailingIcon = { Icon(Icons.Default.ArrowDropDown, null, tint = TextSecondary) }
+                )
+                DropdownMenu(
+                    expanded = dropdownExpanded,
+                    onDismissRequest = { dropdownExpanded = false },
+                    modifier = Modifier.background(CardBg)
+                ) {
+                    ui.agents.forEach { agent ->
+                        DropdownMenuItem(
+                            text = { Text(agent.display_name ?: agent.agent_id, color = TextPrimary) },
+                            onClick = {
+                                selectedAgentId = agent.agent_id
+                                dropdownExpanded = false
+                                vm.loadMetrics(selectedAgentId, timeRange)
+                            }
+                        )
+                    }
+                }
+            }
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(1 to "1ч", 6 to "6ч", 24 to "24ч").forEach { (h, label) ->
+                    FilterChip(
+                        selected = timeRange == h,
+                        onClick = { timeRange = h; vm.loadMetrics(selectedAgentId, h) },
+                        label = { Text(label, color = if (timeRange == h) Color.White else TextSecondary) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = AccentVoid,
+                            containerColor = CardBg
+                        )
+                    )
+                }
+            }
+        }
+        if (ui.metricsLoading) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentVoid)
+                }
+            }
+        } else if (ui.detailMetrics.isNotEmpty()) {
+            item { ChartCard("Load Average", ui.detailMetrics, { it.load1.toFloat() }, AccentVoid, "") }
+            item {
+                ChartCard("RAM %", ui.detailMetrics, { m ->
+                    val total = m.mem_total ?: 1L
+                    if (total == 0L) 0f else ((total - m.mem_free).toFloat() / total * 100f)
+                }, Color(0xFF7EE787), "%", 100f)
+            }
+            item { ChartCard("Температура °C", ui.detailMetrics, { it.temperature ?: 0f }, Color(0xFFFF7B72), "°") }
+            item { ChartCard("WiFi клиенты", ui.detailMetrics, { it.wifi_clients?.toFloat() ?: 0f }, H3363tPurple, "") }
+        } else if (selectedAgentId.isNotEmpty()) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                    Text("Нет данных метрик", color = TextSecondary)
+                }
+            }
+        }
+    }
+}
+
+// ─── ADMIN TAB ────────────────────────────────────────────────────────────────
+
+@Composable
+fun AdminTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    var showCreateDialog by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        Modifier.fillMaxSize().padding(pad),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("Администраторы", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                FloatingActionButton(
+                    onClick = { showCreateDialog = true },
+                    containerColor = AccentVoid,
+                    modifier = Modifier.size(40.dp)
+                ) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
+            }
+        }
+        if (ui.adminLoading) {
+            item {
+                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentVoid)
+                }
+            }
+        }
+        if (ui.adminError != null) {
+            item { Text(ui.adminError, color = OfflineRed, fontSize = 13.sp) }
+        }
+        items(ui.adminList) { admin ->
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (admin.role == "superadmin") Icons.Outlined.ManageAccounts else Icons.Outlined.Person,
+                        null, tint = if (admin.role == "superadmin") TrustGold else TextSecondary
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(admin.username, color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text(admin.role, color = TextSecondary, fontSize = 12.sp)
+                    }
+                    if (admin.username != ui.username) {
+                        IconButton(onClick = { vm.deleteAdmin(admin.username) }) {
+                            Icon(Icons.Default.Delete, null, tint = OfflineRed)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showCreateDialog) {
+        var newUsername by remember { mutableStateOf("") }
+        var newPassword by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCreateDialog = false },
+            title = { Text("Новый администратор", color = TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = newUsername, onValueChange = { newUsername = it },
+                        label = { Text("Username") }, colors = customOutlinedColors(), singleLine = true)
+                    OutlinedTextField(value = newPassword, onValueChange = { newPassword = it },
+                        label = { Text("Password") }, colors = customOutlinedColors(), singleLine = true,
+                        visualTransformation = PasswordVisualTransformation())
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { vm.createAdmin(newUsername, newPassword); showCreateDialog = false },
+                    enabled = newUsername.isNotBlank() && newPassword.length >= 4,
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                ) { Text("Создать") }
+            },
+            dismissButton = { TextButton({ showCreateDialog = false }) { Text("Отмена", color = TextSecondary) } },
+            containerColor = CardBg
+        )
+    }
+}
+
+// ─── LOCAL NODE MONITOR ──────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocalNodeScreen(
+    connected: Boolean,
+    peerCount: Int,
+    loading: Boolean,
+    onRefresh: () -> Unit,
+    onBack: () -> Unit
+) {
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(agent.display_name ?: agent.agent_id,
-                        fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.PhoneAndroid, null, tint = AccentVoid)
+                        Spacer(Modifier.width(8.dp))
+                        Text("Локальная нода", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onBack) {
-                        Icon(Icons.Default.ArrowBack, null, tint = TextSecondary)
+                    IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) }
+                },
+                actions = {
+                    IconButton(onRefresh) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        Column(
+            Modifier.fillMaxSize().padding(pad).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Status card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(12.dp).background(
+                                if (connected) OnlineGreen else OfflineRed,
+                                RoundedCornerShape(50)
+                            )
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                if (connected) "Нода активна" else "Нода не запущена",
+                                color = if (connected) OnlineGreen else OfflineRed,
+                                fontWeight = FontWeight.Bold, fontSize = 16.sp
+                            )
+                            Text("ws://127.0.0.1:9001", color = TextSecondary, fontSize = 11.sp,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                        }
                     }
+
+                    HorizontalDivider(color = DividerColor)
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                        StatItem("Пиры", if (connected) peerCount.toString() else "—")
+                        StatItem("Порт WS", "9001")
+                        StatItem("h3363t-core", "v0.6.0")
+                    }
+                }
+            }
+
+            // Info card
+            if (!connected) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Запуск локальной ноды", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "Нода h3363t-core должна быть запущена как Foreground Service " +
+                            "через H3363TService на этом устройстве.",
+                            color = TextSecondary, fontSize = 13.sp
+                        )
+                    }
+                }
+            }
+
+            if (loading) {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentVoid)
+                }
+            }
+        }
+    }
+}
+
+// ─── SETTINGS ────────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SettingsScreen(
+    serverUrl: String,
+    username: String,
+    onSave: (String) -> Unit,
+    onLogout: () -> Unit,
+    onBack: () -> Unit
+) {
+    var urlField by remember(serverUrl) { mutableStateOf(serverUrl) }
+    var saved by remember { mutableStateOf(false) }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки", fontWeight = FontWeight.Bold, color = TextPrimary) },
+                navigationIcon = {
+                    IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        Column(
+            Modifier.fillMaxSize().padding(pad).padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Connection card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("Подключение", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    InfoRow("Пользователь", username.ifBlank { "—" })
+                    OutlinedTextField(
+                        value = urlField,
+                        onValueChange = { urlField = it; saved = false },
+                        label = { Text("OWM Server URL") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = customOutlinedColors(),
+                        singleLine = true
+                    )
+                    if (saved) {
+                        Text("✓ Сохранено", color = OnlineGreen, fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick = {
+                            onSave(urlField)
+                            saved = true
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
+                        enabled = urlField.isNotBlank() && urlField != serverUrl
+                    ) {
+                        Text("Сохранить и переподключиться")
+                    }
+                }
+            }
+
+            // About card
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = CardBg),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("О приложении", color = TextPrimary, fontWeight = FontWeight.SemiBold)
+                    InfoRow("Версия", "1.0.0")
+                    InfoRow("OWM Server", "v2.5.0")
+                    InfoRow("h3363t-core", "v0.6.0-alpha")
+                }
+            }
+
+            Spacer(Modifier.weight(1f))
+
+            // Logout
+            OutlinedButton(
+                onClick = onLogout,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = OfflineRed)
+            ) {
+                Icon(Icons.Default.ExitToApp, null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Выйти")
+            }
+        }
+    }
+}
+
+// ─── H3363T NODE SCREEN ─────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun H3363TScreen(
+    nodes: List<H3363tNodeStatus>,
+    events: List<H3363tEvent>,
+    loading: Boolean,
+    error: String?,
+    connected: Boolean,
+    commandResult: String?,
+    onRefresh: () -> Unit,
+    onCommand: (String, Int?, String?) -> Unit,
+    onClearResult: () -> Unit,
+    onBack: () -> Unit
+) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.Security, null, tint = H3363tPurple)
+                        Spacer(Modifier.width(8.dp))
+                        Text("H3363T Нода", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    }
+                },
+                navigationIcon = {
+                    IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) }
+                },
+                actions = {
+                    Box(Modifier.padding(end = 4.dp)) {
+                        Box(
+                            Modifier.size(10.dp).background(
+                                if (connected) OnlineGreen else OfflineRed,
+                                RoundedCornerShape(50)
+                            )
+                        )
+                    }
+                    IconButton(onRefresh) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
             )
@@ -294,31 +977,269 @@ fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, on
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Кнопки действий
             item {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(
-                        onClick = { onOpenTerminal("__terminal__") },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
-                        enabled = agent.online
-                    ) {
-                        Text("SSH терминал", color = TextPrimary, fontSize = 13.sp)
+                when {
+                    loading -> Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = H3363tPurple)
                     }
-                    if (agent.luci_url != null) {
-                        Button(
-                            onClick = { onOpenTerminal("__luci__") },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF21262D)),
-                            enabled = agent.online
-                        ) {
-                            Text("LuCI", color = TextPrimary, fontSize = 13.sp)
+                    error != null -> Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(Modifier.padding(24.dp)) { Text(error, color = OfflineRed) }
+                    }
+                    nodes.isNotEmpty() -> NodeStatusCard(nodes[0])
+                    else -> Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(Modifier.padding(24.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Outlined.Devices, null, tint = TextSecondary, modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text("Нода не подключена к OWM серверу", color = TextSecondary)
+                            }
                         }
                     }
                 }
             }
 
-            // Статус карточка
+            item {
+                CommandPanel(onCommand = onCommand, commandResult = commandResult, onClearResult = onClearResult)
+            }
+
+            if (events.isNotEmpty()) {
+                item {
+                    Text("Журнал событий", fontWeight = FontWeight.SemiBold, color = TextPrimary,
+                        fontSize = 16.sp, modifier = Modifier.padding(vertical = 8.dp))
+                }
+                items(events.take(50)) { event -> EventCard(event) }
+            }
+        }
+    }
+}
+
+@Composable
+fun NodeStatusCard(node: H3363tNodeStatus) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Key, null, tint = TrustGold, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "${node.pubkey.take(8)}...${node.pubkey.takeLast(8)}",
+                    color = TextSecondary, fontSize = 11.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+            }
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Star, null, tint = TrustGold, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Trust Level", color = TextSecondary, fontSize = 13.sp)
+                Spacer(Modifier.weight(1f))
+                Text("${node.trust_level}/100", color = TrustGold, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            }
+
+            HorizontalDivider(color = DividerColor)
+
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                StatItem("Peers", node.peer_count.toString())
+                StatItem("Feed", formatFeedSize(node.feed_size))
+                StatItem("Uptime", formatUptime(node.uptime_sec.toDouble()))
+            }
+
+            HorizontalDivider(color = DividerColor)
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(10.dp).background(
+                        if (node.osiis_active) OnlineGreen else OfflineRed,
+                        RoundedCornerShape(50)
+                    )
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "OSIIS ${if (node.osiis_active) "Active" else "Inactive"}",
+                    color = if (node.osiis_active) OnlineGreen else OfflineRed, fontSize = 13.sp
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CommandPanel(
+    onCommand: (String, Int?, String?) -> Unit,
+    commandResult: String?,
+    onClearResult: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text("Быстрые действия", fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CommandButton("Firewall 9004", Icons.Outlined.Shield) { onCommand("apply_firewall", 9004, "ACCEPT") }
+                CommandButton("Restart", Icons.Outlined.RestartAlt) { onCommand("restart_node", null, null) }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                CommandButton("Sync Now", Icons.Outlined.Sync) { onCommand("sync_now", null, null) }
+                CommandButton("Port Fwd", Icons.Outlined.OpenInBrowser) { onCommand("set_port_forward", 9005, "TCP") }
+            }
+            if (commandResult != null) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    color = if (commandResult.startsWith("✓")) Color(0xFF0D2818) else Color(0xFF2D1215),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        Modifier.padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            commandResult,
+                            color = if (commandResult.startsWith("✓")) OnlineGreen else OfflineRed,
+                            fontSize = 13.sp, modifier = Modifier.weight(1f)
+                        )
+                        IconButton(onClick = onClearResult, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun RowScope.CommandButton(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = Modifier.weight(1f),
+        colors = ButtonDefaults.outlinedButtonColors(
+            contentColor = TextPrimary,
+            containerColor = Color(0xFF16133A)
+        )
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(icon, null, tint = AccentVoid, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(label, fontSize = 11.sp)
+        }
+    }
+}
+
+@Composable
+fun EventCard(event: H3363tEvent) {
+    Card(
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            Modifier.padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Surface(
+                modifier = Modifier.size(32.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = when (event.event_type) {
+                    "peer_connected"       -> Color(0xFF1A1435)
+                    "trust_level_changed"  -> Color(0xFF3D3308)
+                    "feed_sync_complete"   -> Color(0xFF0D2818)
+                    "ban_applied"          -> Color(0xFF2D1215)
+                    else                   -> Color(0xFF16133A)
+                }
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        when (event.event_type) {
+                            "peer_connected"      -> Icons.Outlined.People
+                            "trust_level_changed" -> Icons.Outlined.Star
+                            "feed_sync_complete"  -> Icons.Outlined.CheckCircle
+                            "ban_applied"         -> Icons.Outlined.Block
+                            else                  -> Icons.Outlined.Info
+                        },
+                        null,
+                        tint = when (event.event_type) {
+                            "peer_connected"      -> AccentVoid
+                            "trust_level_changed" -> TrustGold
+                            "feed_sync_complete"  -> OnlineGreen
+                            "ban_applied"         -> OfflineRed
+                            else                  -> TextSecondary
+                        },
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(event.event_type.replace("_", " ").capitalize(),
+                    fontWeight = FontWeight.Medium, color = TextPrimary, fontSize = 13.sp)
+                Text("${event.node_pubkey.take(6)}...${event.node_pubkey.takeLast(6)}",
+                    color = TextSecondary, fontSize = 10.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            }
+            Text(formatEventTime(event.timestamp), color = TextSecondary, fontSize = 11.sp)
+        }
+    }
+}
+
+// ─── DETAIL SCREEN ───────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, onOpenTerminal: (String) -> Unit = {}) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(agent.display_name ?: agent.agent_id, fontWeight = FontWeight.Bold, color = TextPrimary) },
+                navigationIcon = {
+                    IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        LazyColumn(
+            Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { onOpenTerminal("__terminal__") },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                        enabled = agent.online
+                    ) { Text("SSH терминал", color = TextPrimary, fontSize = 13.sp) }
+                    if (agent.luci_url != null) {
+                        Button(
+                            onClick = { onOpenTerminal("__luci__") },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                            enabled = agent.online
+                        ) { Text("LuCI", color = TextPrimary, fontSize = 13.sp) }
+                    }
+                }
+            }
+
             item {
                 Card(shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = CardBg),
@@ -332,10 +1253,8 @@ fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, on
                                 color = if (agent.online) OnlineGreen else OfflineRed,
                                 fontWeight = FontWeight.SemiBold)
                         }
-                        if (agent.address != null)
-                            InfoRow("Адрес", agent.address)
-                        if (agent.local_ip != null)
-                            InfoRow("IP", agent.local_ip)
+                        if (agent.address != null) InfoRow("Адрес", agent.address)
+                        if (agent.local_ip != null) InfoRow("IP", agent.local_ip)
                         agent.metric?.let { m ->
                             InfoRow("Uptime", formatUptime(m.uptime))
                             InfoRow("Температура", m.temperature?.let { "%.1f°C".format(it) } ?: "—")
@@ -348,50 +1267,83 @@ fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, on
             }
 
             if (metrics.isNotEmpty()) {
-                // График Load
-                item {
-                    ChartCard(
-                        title = "Load Average",
-                        metrics = metrics,
-                        valueSelector = { it.load1.toFloat() },
-                        color = AccentBlue,
-                        unit = ""
-                    )
-                }
-                // График RAM
-                item {
-                    ChartCard(
-                        title = "RAM использование %",
-                        metrics = metrics,
-                        valueSelector = { m ->
-                            val total = m.mem_total ?: 1L
-                            if (total == 0L) 0f
-                            else ((total - m.mem_free).toFloat() / total * 100f)
-                        },
-                        color = Color(0xFF7EE787),
-                        unit = "%",
-                        maxValue = 100f
-                    )
-                }
-                // График температуры
-                item {
-                    ChartCard(
-                        title = "Температура °C",
-                        metrics = metrics,
-                        valueSelector = { it.temperature ?: 0f },
-                        color = Color(0xFFFF7B72),
-                        unit = "°"
-                    )
-                }
+                item { ChartCard("Load Average", metrics, { it.load1.toFloat() }, AccentVoid, "") }
+                item { ChartCard("RAM %", metrics, { m ->
+                    val total = m.mem_total ?: 1L
+                    if (total == 0L) 0f else ((total - m.mem_free).toFloat() / total * 100f)
+                }, Color(0xFF7EE787), "%", 100f) }
+                item { ChartCard("Температура °C", metrics, { it.temperature ?: 0f }, Color(0xFFFF7B72), "°") }
             } else if (agent.online) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(32.dp),
-                        contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = AccentBlue)
+                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = AccentVoid)
                     }
                 }
             }
         }
+    }
+}
+
+// ─── WEB SCREEN ──────────────────────────────────────────────────────────────
+
+@Composable
+fun MainWebScreen(serverUrl: String, token: String, username: String, onLogout: () -> Unit) {
+    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+    BackHandler {
+        val wv = webViewRef
+        if (wv != null && wv.canGoBack()) wv.goBack()
+    }
+
+    Box(Modifier.fillMaxSize().background(BgDark)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.loadWithOverviewMode = true
+                    settings.useWideViewPort = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView,
+                            request: android.webkit.WebResourceRequest
+                        ): Boolean {
+                            view.loadUrl(request.url.toString())
+                            return true
+                        }
+                        override fun onPageFinished(view: android.webkit.WebView, pageUrl: String) {
+                            val safeToken = org.json.JSONObject.quote(token)
+                            val safeUser = org.json.JSONObject.quote(username)
+                            val js = """
+                                (function() {
+                                    if (!localStorage.getItem('owm_token')) {
+                                        localStorage.setItem('owm_token', $safeToken);
+                                        localStorage.setItem('owm_user', $safeUser);
+                                        location.reload();
+                                    }
+                                })();
+                            """.trimIndent()
+                            view.evaluateJavascript(js, null)
+                        }
+                    }
+                    webChromeClient = android.webkit.WebChromeClient()
+                    webViewRef = this
+                    loadUrl(serverUrl)
+                }
+            }
+        )
+    }
+}
+
+// ─── Helper Components ───────────────────────────────────────────────────────
+
+@Composable
+fun StatItem(label: String, value: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(value, color = TextPrimary, fontWeight = FontWeight.Medium, fontSize = 14.sp)
+        Text(label, color = TextSecondary, fontSize = 11.sp)
     }
 }
 
@@ -414,7 +1366,6 @@ fun ChartCard(
 ) {
     val values = metrics.map(valueSelector)
     val max = maxValue ?: (values.maxOrNull()?.times(1.2f) ?: 1f).coerceAtLeast(1f)
-    val min = 0f
     val lastVal = values.lastOrNull()
 
     Card(shape = RoundedCornerShape(12.dp),
@@ -428,149 +1379,84 @@ fun ChartCard(
             }
             Canvas(modifier = Modifier.fillMaxWidth().height(100.dp)) {
                 if (values.size < 2) return@Canvas
-                val w = size.width
-                val h = size.height
+                val w = size.width; val h = size.height
                 val step = w / (values.size - 1)
-                val range = (max - min).coerceAtLeast(0.001f)
-
-                // Линия
+                val range = (max - 0f).coerceAtLeast(0.001f)
                 for (i in 0 until values.size - 1) {
-                    val x1 = i * step
-                    val y1 = h - ((values[i] - min) / range * h)
-                    val x2 = (i + 1) * step
-                    val y2 = h - ((values[i + 1] - min) / range * h)
-                    drawLine(
-                        color = color,
+                    val x1 = i * step; val y1 = h - (values[i] / range * h)
+                    val x2 = (i + 1) * step; val y2 = h - (values[i + 1] / range * h)
+                    drawLine(color = color,
                         start = androidx.compose.ui.geometry.Offset(x1, y1),
                         end = androidx.compose.ui.geometry.Offset(x2, y2),
-                        strokeWidth = 2.5f
-                    )
+                        strokeWidth = 2.5f)
                 }
-
-                // Последняя точка
                 val lx = (values.size - 1) * step
-                val ly = h - ((values.last() - min) / range * h)
-                drawCircle(color = color, radius = 4f,
-                    center = androidx.compose.ui.geometry.Offset(lx, ly))
+                val ly = h - (values.last() / range * h)
+                drawCircle(color = color, radius = 4f, center = androidx.compose.ui.geometry.Offset(lx, ly))
             }
         }
     }
 }
 
-// ─── WEB SCREEN (SSH терминал / LuCI) ────────────────────────────────────────
-
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun WebScreen(url: String, token: String, username: String, onBack: () -> Unit) {
-    val uiUrl = url.substringBefore("/#").substringBefore("/luci-login")
-    val isLuci = url.contains("luci-login")
+fun customOutlinedColors() = OutlinedTextFieldDefaults.colors(
+    focusedBorderColor = AccentVoid,
+    unfocusedBorderColor = Color(0xFF2A2250),
+    focusedLabelColor = AccentVoid,
+    unfocusedLabelColor = TextSecondary,
+    focusedTextColor = TextPrimary,
+    unfocusedTextColor = TextPrimary,
+    cursorColor = AccentVoid
+)
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(if (isLuci) "LuCI" else "SSH Терминал",
-                        fontWeight = FontWeight.Bold, color = TextPrimary)
-                },
-                navigationIcon = {
-                    IconButton(onBack) {
-                        Icon(Icons.Default.ArrowBack, null, tint = TextSecondary)
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
-            )
-        },
-        containerColor = BgDark
-    ) { pad ->
-        AndroidView(
-            modifier = Modifier.fillMaxSize().padding(pad),
-            factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.setSupportZoom(true)
-                    webViewClient = object : android.webkit.WebViewClient() {
-                        override fun onPageFinished(view: android.webkit.WebView, pageUrl: String) {
-                            // Инжектируем токен — если его нет, ставим и перезагружаем
-                            val js = """
-                                (function() {
-                                    if (!localStorage.getItem('owm_token')) {
-                                        localStorage.setItem('owm_token', '$token');
-                                        localStorage.setItem('owm_user', '$username');
-                                        location.reload();
-                                    }
-                                })();
-                            """.trimIndent()
-                            view.evaluateJavascript(js, null)
-                        }
-                    }
-                    // Загружаем owm-ui
-                    val baseUiUrl = uiUrl.replace(":9000", ":1420")
-                    loadUrl(baseUiUrl)
-                }
-            }
-        )
+// ─── Format Helpers ──────────────────────────────────────────────────────────
+
+fun memPercent(free: Long?, total: Long?): String {
+    if (free == null || total == null || total == 0L) return "—"
+    return "%.0f%%".format((total - free).toDouble() / total * 100)
+}
+
+fun formatUptime(secs: Double): String {
+    val s = secs.toLong()
+    return when {
+        s < 3600 -> "${s / 60}м"
+        s < 86400 -> "${s / 3600}ч"
+        else -> "${s / 86400}д"
     }
 }
 
-// ─── MAIN WEB SCREEN ─────────────────────────────────────────────────────────
-
-@Composable
-fun MainWebScreen(serverUrl: String, token: String, username: String, onLogout: () -> Unit) {
-    val uiUrl = serverUrl.replace(":9000", ":1420")
-    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
-
-    BackHandler {
-        val wv = webViewRef
-        if (wv != null && wv.canGoBack()) wv.goBack()
-    }
-
-    Box(Modifier.fillMaxSize().background(BgDark)) {
-        AndroidView(
-            modifier = Modifier.fillMaxSize(),
-            factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.loadWithOverviewMode = true
-                    settings.useWideViewPort = true
-                    settings.setSupportZoom(false)
-                    settings.builtInZoomControls = false
-                    settings.displayZoomControls = false
-                    settings.textZoom = 100
-                    settings.setRenderPriority(android.webkit.WebSettings.RenderPriority.HIGH)
-                    setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
-                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    webViewClient = object : android.webkit.WebViewClient() {
-                        override fun shouldOverrideUrlLoading(
-                            view: android.webkit.WebView,
-                            request: android.webkit.WebResourceRequest
-                        ): Boolean {
-                            view.loadUrl(request.url.toString())
-                            return true
-                        }
-                        override fun onPageFinished(view: android.webkit.WebView, pageUrl: String) {
-                            val js = """
-                                (function() {
-                                    if (!localStorage.getItem('owm_token')) {
-                                        localStorage.setItem('owm_token', '$token');
-                                        localStorage.setItem('owm_user', '$username');
-                                        location.reload();
-                                    }
-                                })();
-                            """.trimIndent()
-                            view.evaluateJavascript(js, null)
-                        }
-                    }
-                    webChromeClient = android.webkit.WebChromeClient()
-                    clearCache(true)
-                    clearHistory()
-                    webViewRef = this
-                    loadUrl(uiUrl)
-                }
-            }
-        )
+fun formatBytes(bytes: Long?): String {
+    if (bytes == null) return "—"
+    return when {
+        bytes < 1024 -> "${bytes}B"
+        bytes < 1048576 -> "${bytes / 1024}K"
+        bytes < 1073741824 -> "${bytes / 1048576}M"
+        else -> "%.1fG".format(bytes / 1073741824.0)
     }
 }
+
+fun formatAgo(secs: Long): String = when {
+    secs < 60 -> "${secs}с"
+    secs < 3600 -> "${secs / 60}м"
+    else -> "${secs / 3600}ч"
+}
+
+fun formatFeedSize(bytes: Long): String = when {
+    bytes < 1024 -> "${bytes} B"
+    bytes < 1048576 -> "${bytes / 1024} KB"
+    bytes < 1073741824 -> "${bytes / 1048576} MB"
+    else -> "%.1f GB".format(bytes / 1073741824.0)
+}
+
+fun formatEventTime(timestamp: Long): String {
+    val diff = System.currentTimeMillis() / 1000 - timestamp
+    return when {
+        diff < 60 -> "${diff}с"
+        diff < 3600 -> "${diff / 60}м"
+        diff < 86400 -> "${diff / 3600}ч"
+        else -> "${diff / 86400}д"
+    }
+}
+
+fun String.capitalize(): String =
+    if (isNotEmpty()) replaceFirstChar { it.uppercase() } else this
