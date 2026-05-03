@@ -167,36 +167,239 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
 
 @Composable
 fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    Column(Modifier.fillMaxSize().padding(pad)) {
+        // Sub-header row
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(CardBg)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                "РОУТЕРЫ (${ui.agents.size})",
+                color = TextSecondary, fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedButton(
+                onClick = { vm.refresh() },
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp),
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+            ) {
+                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("Обновить", fontSize = 11.sp)
+            }
+            Button(
+                onClick = { vm.openAddRouter() },
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+            ) {
+                Text("+ Добавить", fontSize = 11.sp)
+            }
+        }
+        HorizontalDivider(color = DividerColor)
+
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item { ServerStatusCard(ui) }
+            if (ui.agents.isEmpty()) {
+                item {
+                    Box(Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                        contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Icon(Icons.Outlined.Router, null,
+                                tint = TextSecondary, modifier = Modifier.size(48.dp))
+                            Spacer(Modifier.height(8.dp))
+                            Text("Нет зарегистрированных агентов",
+                                color = TextSecondary, fontSize = 14.sp)
+                        }
+                    }
+                }
+            } else {
+                items(ui.agents) { agent ->
+                    AgentCard(
+                        a = agent,
+                        onMetrics = {
+                            vm.loadMetrics(agent.agent_id, 1)
+                            vm.navigateTo(Screen.Metrics)
+                        },
+                        onSsh = { vm.navigateTo(Screen.SshTerminal(agent)) },
+                        onLuci = { vm.navigateTo(Screen.LuciView(agent)) },
+                        onSettings = { vm.openDetail(agent) },
+                        onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    var showInstallDialog by remember { mutableStateOf(false) }
+    val installCmd = if (ui.installAgentStatus?.startsWith("CMD:") == true)
+        ui.installAgentStatus.removePrefix("CMD:") else null
+
+    LaunchedEffect(ui.installAgentStatus) {
+        if (ui.installAgentStatus?.startsWith("CMD:") == true) showInstallDialog = true
+    }
+
     LazyColumn(
         Modifier.fillMaxSize().padding(pad),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         item {
-            ServerStatusCard(ui)
+            Text("+ Добавить роутер", color = AccentVoid,
+                fontWeight = FontWeight.Bold, fontSize = 20.sp)
         }
-        if (ui.agents.isEmpty()) {
-            item {
-                Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(Icons.Outlined.Router, null, tint = TextSecondary, modifier = Modifier.size(48.dp))
-                        Spacer(Modifier.height(8.dp))
-                        Text("Нет зарегистрированных агентов", color = TextSecondary, fontSize = 14.sp)
-                    }
-                }
+        item {
+            OutlinedTextField(
+                value = ui.addRouterId,
+                onValueChange = { vm.setAddRouterField(id = it) },
+                label = { Text("ID роутера / hostname") },
+                placeholder = { Text("ax6000", color = TextSecondary) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = customOutlinedColors(), singleLine = true
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = ui.addRouterName,
+                onValueChange = { vm.setAddRouterField(name = it) },
+                label = { Text("Название (необязательно)") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = customOutlinedColors(), singleLine = true
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = ui.addRouterDesc,
+                onValueChange = { vm.setAddRouterField(desc = it) },
+                label = { Text("Описание (необязательно)") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = customOutlinedColors(), singleLine = true
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = ui.addRouterIp,
+                onValueChange = { vm.setAddRouterField(ip = it) },
+                label = { Text("IP роутера (LAN)") },
+                placeholder = { Text("192.168.1.1", color = TextSecondary) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = customOutlinedColors(), singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+            )
+        }
+        item {
+            OutlinedTextField(
+                value = ui.addRouterSshPass,
+                onValueChange = { vm.setAddRouterField(sshPass = it) },
+                label = { Text("SSH пароль (root)") },
+                modifier = Modifier.fillMaxWidth(),
+                colors = customOutlinedColors(), singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+            )
+        }
+        item {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = ui.addRouterAddress,
+                    onValueChange = { vm.setAddRouterField(address = it) },
+                    label = { Text("Адрес / метка") },
+                    modifier = Modifier.weight(1f),
+                    colors = customOutlinedColors(), singleLine = true
+                )
+                OutlinedButton(
+                    onClick = { vm.enterMapPickMode() },
+                    modifier = Modifier.size(56.dp).align(Alignment.CenterVertically),
+                    contentPadding = PaddingValues(0.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentVoid)
+                ) { Text("📍", fontSize = 20.sp) }
             }
-        } else {
-            items(ui.agents) { agent ->
-                AgentCard(
-                    a = agent,
-                    onMetrics = { vm.loadMetrics(agent.agent_id, 1); vm.navigateTo(Screen.Metrics) },
-                    onSsh = { vm.navigateTo(Screen.SshTerminal(agent)) },
-                    onLuci = { vm.navigateTo(Screen.LuciView(agent)) },
-                    onSettings = { vm.openDetail(agent) },
-                    onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
+        }
+        if (ui.addRouterLat != null && ui.addRouterLng != null) {
+            item {
+                Text(
+                    "✓ %.4f, %.4f".format(ui.addRouterLat, ui.addRouterLng),
+                    color = OnlineGreen, fontSize = 13.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
                 )
             }
         }
+        if (ui.installAgentStatus != null && !ui.installAgentStatus.startsWith("CMD:")) {
+            item {
+                Text(
+                    ui.installAgentStatus,
+                    color = when {
+                        ui.installAgentStatus.startsWith("✓") -> OnlineGreen
+                        ui.installAgentStatus.startsWith("✗") -> OfflineRed
+                        else -> TextSecondary
+                    },
+                    fontSize = 13.sp,
+                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                )
+            }
+        }
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = { vm.submitAddRouter() },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
+                    enabled = ui.addRouterId.isNotBlank() && ui.addRouterIp.isNotBlank()
+                            && ui.installAgentStatus != "⏳ Подключаемся..."
+                ) {
+                    if (ui.installAgentStatus == "⏳ Подключаемся...")
+                        CircularProgressIndicator(Modifier.size(18.dp), color = Color.White)
+                    else
+                        Text("Установить агент", fontWeight = FontWeight.SemiBold)
+                }
+                OutlinedButton(
+                    onClick = { vm.closeAddRouter() },
+                    modifier = Modifier.height(48.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                ) { Text("Отмена") }
+            }
+        }
+        item {
+            TextButton(onClick = { vm.installAgent() }) {
+                Text("Показать команду установки", color = TextSecondary, fontSize = 12.sp)
+            }
+        }
+    }
+
+    if (showInstallDialog && installCmd != null) {
+        AlertDialog(
+            onDismissRequest = { showInstallDialog = false },
+            title = { Text("Команда установки агента", color = TextPrimary) },
+            text = {
+                androidx.compose.foundation.text.selection.SelectionContainer {
+                    Text(
+                        installCmd,
+                        color = OnlineGreen, fontSize = 12.sp,
+                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showInstallDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                ) { Text("OK") }
+            },
+            containerColor = CardBg
+        )
     }
 }
 
