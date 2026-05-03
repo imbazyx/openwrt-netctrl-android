@@ -295,25 +295,32 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
         topBar = {
             TopAppBar(
                 title = {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("H3363T NetCtrl", fontWeight = FontWeight.Bold, color = TextPrimary)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("⚡", fontSize = 18.sp)
+                        Text("H3363T NetCtrl", fontWeight = FontWeight.Bold, color = AccentVoid, fontSize = 17.sp)
                         if (ui.serverHealthOk) {
-                            Spacer(Modifier.width(8.dp))
                             Box(Modifier.size(7.dp).background(OnlineGreen, RoundedCornerShape(50)))
+                            Text("онлайн", color = OnlineGreen, fontSize = 12.sp)
                         }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg),
                 actions = {
                     IconButton({ vm.refresh() }) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
-                    IconButton({ vm.navigateTo(Screen.Settings) }) { Icon(Icons.Default.Settings, null, tint = TextSecondary) }
+                    OutlinedButton(
+                        onClick = { vm.logout() },
+                        modifier = Modifier.padding(end = 8.dp).height(32.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    ) { Text("Выйти", fontSize = 12.sp) }
                 }
             )
         },
         bottomBar = {
             NavigationBar(containerColor = CardBg, tonalElevation = 0.dp) {
+                val dashActive = screen is Screen.Dashboard || screen is Screen.AddRouter
                 NavigationBarItem(
-                    selected = screen is Screen.Dashboard,
+                    selected = dashActive,
                     onClick = { vm.navigateTo(Screen.Dashboard) },
                     icon = { Icon(Icons.Outlined.Router, null) },
                     label = { Text("Роутеры", fontSize = 11.sp) },
@@ -354,11 +361,12 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
         containerColor = BgDark
     ) { pad ->
         when (screen) {
-            is Screen.Map     -> MapTabContent(ui, vm, pad)
-            is Screen.Ssh     -> SshTabContent(ui, vm, pad)
-            is Screen.Metrics -> MetricsTabContent(ui, vm, pad)
-            is Screen.Admin   -> AdminTabContent(ui, vm, pad)
-            else              -> RouterListTab(ui, vm, pad)
+            is Screen.Map       -> MapTabContent(ui, vm, pad)
+            is Screen.Ssh       -> SshTabContent(ui, vm, pad)
+            is Screen.Metrics   -> MetricsTabContent(ui, vm, pad)
+            is Screen.Admin     -> AdminTabContent(ui, vm, pad)
+            is Screen.AddRouter -> AddRouterContent(ui, vm, pad)
+            else                -> RouterListTab(ui, vm, pad)
         }
     }
 }
