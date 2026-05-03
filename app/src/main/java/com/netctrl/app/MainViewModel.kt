@@ -357,6 +357,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPickedLocation(lat: Double, lng: Double) {
+        if (lat == 0.0 && lng == 0.0) return
         _ui.update { it.copy(
             pickedLat = lat, pickedLng = lng,
             addRouterLat = if (it.mapPickMode) lat else it.addRouterLat,
@@ -386,12 +387,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         ip: String? = null, sshPass: String? = null, address: String? = null
     ) {
         _ui.update { s -> s.copy(
-            addRouterId      = id      ?: s.addRouterId,
-            addRouterName    = name    ?: s.addRouterName,
-            addRouterDesc    = desc    ?: s.addRouterDesc,
-            addRouterIp      = ip      ?: s.addRouterIp,
-            addRouterSshPass = sshPass ?: s.addRouterSshPass,
-            addRouterAddress = address ?: s.addRouterAddress
+            addRouterId      = if (id      != null) id      else s.addRouterId,
+            addRouterName    = if (name    != null) name    else s.addRouterName,
+            addRouterDesc    = if (desc    != null) desc    else s.addRouterDesc,
+            addRouterIp      = if (ip      != null) ip      else s.addRouterIp,
+            addRouterSshPass = if (sshPass != null) sshPass else s.addRouterSshPass,
+            addRouterAddress = if (address != null) address else s.addRouterAddress
         ) }
     }
 
@@ -414,6 +415,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun submitAddRouter() {
         val s = _ui.value
+        if (s.serverUrl.isBlank() || s.token.isBlank()) {
+            _ui.update { it.copy(installAgentStatus = "✗ Нет подключения к серверу") }
+            return
+        }
         if (s.addRouterId.isBlank() || s.addRouterIp.isBlank()) {
             _ui.update { it.copy(installAgentStatus = "✗ Введите ID и IP роутера") }
             return
