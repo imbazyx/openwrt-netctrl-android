@@ -708,12 +708,12 @@ class MapBridge(private val vm: MainViewModel) {
     @android.webkit.JavascriptInterface
     fun onAgentClick(agentId: String) {
         val agent = vm.ui.value.agents.find { it.agent_id == agentId } ?: return
-        kotlinx.coroutines.MainScope().launch { vm.openDetail(agent) }
+        vm.openDetail(agent)
     }
 
     @android.webkit.JavascriptInterface
     fun onLocationPicked(lat: Double, lng: Double) {
-        kotlinx.coroutines.MainScope().launch { vm.setPickedLocation(lat, lng) }
+        vm.setPickedLocation(lat, lng)
     }
 }
 

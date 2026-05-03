@@ -357,7 +357,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPickedLocation(lat: Double, lng: Double) {
-        if (lat == 0.0 && lng == 0.0) return
         _ui.update { it.copy(
             pickedLat = lat, pickedLng = lng,
             addRouterLat = if (it.mapPickMode) lat else it.addRouterLat,
@@ -490,8 +489,4 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         wsManager?.disconnect()
         localNodeManager.disconnect()
     }
-}
-
-private fun <T : Any> MutableStateFlow<T>.update(transform: (T) -> T) {
-    value = transform(value)
 }

@@ -67,15 +67,6 @@ window.refreshAgents = function() {
   }
 };
 
-if (MODE === 'pick') {
-  var pickMarker = null;
-  map.on('click', function(e) {
-    if (pickMarker) map.removeLayer(pickMarker);
-    pickMarker = L.marker([e.latlng.lat, e.latlng.lng]).addTo(map);
-    if (window.AndroidBridge) AndroidBridge.onLocationPicked(e.latlng.lat, e.latlng.lng);
-  });
-}
-
 document.addEventListener('DOMContentLoaded', function() {
   if (window.AndroidBridge) {
     window.setAgents(AndroidBridge.getAgentsJson());
