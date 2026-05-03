@@ -713,7 +713,7 @@ class MapBridge(private val vm: MainViewModel) {
 
     @android.webkit.JavascriptInterface
     fun onLocationPicked(lat: Double, lng: Double) {
-        vm.setPickedLocation(lat, lng)
+        kotlinx.coroutines.MainScope().launch { vm.setPickedLocation(lat, lng) }
     }
 }
 
@@ -721,14 +721,108 @@ class MapBridge(private val vm: MainViewModel) {
 fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     val agentsSnapshot = ui.agents
+    val pickMode = ui.mapPickMode
 
     LaunchedEffect(agentsSnapshot) {
         webViewRef?.evaluateJavascript("refreshAgents();", null)
     }
+    LaunchedEffect(pickMode) {
+        if (pickMode) webViewRef?.evaluateJavascript("enterPickMode();", null)
+        else webViewRef?.evaluateJavascript("exitPickMode();", null)
+    }
 
-    Box(Modifier.fillMaxSize().padding(pad)) {
+    Row(Modifier.fillMaxSize().padding(pad)) {
+        // ── Left sidebar ─────────────────────────────────────────────────────
+        Column(
+            Modifier
+                .width(160.dp)
+                .fillMaxHeight()
+                .background(CardBg)
+        ) {
+            // Back button row
+            Row(
+                Modifier.fillMaxWidth().padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(
+                    onClick = { vm.navigateTo(Screen.Dashboard) },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color(0xFF16133A), RoundedCornerShape(6.dp))
+                ) {
+                    Icon(Icons.Default.ArrowBack, null,
+                        tint = TextPrimary, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            if (pickMode) {
+                // Pick mode panel
+                Column(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp)
+                        .background(Color(0xFF2A1020), RoundedCornerShape(8.dp))
+                        .padding(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("📍", fontSize = 18.sp)
+                    Text("Кликни на карту чтобы назначить место",
+                        color = AccentVoid, fontSize = 12.sp)
+                    OutlinedButton(
+                        onClick = { vm.cancelMapPick() },
+                        modifier = Modifier.fillMaxWidth().height(32.dp),
+                        contentPadding = PaddingValues(0.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                    ) { Text("Отмена", fontSize = 12.sp) }
+                }
+            } else {
+                // Router list
+                Text("РОУТЕРЫ",
+                    color = TextSecondary, fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
+                    items(ui.agents) { agent ->
+                        Row(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { vm.openDetail(agent) }
+                                .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.Top,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(
+                                Modifier
+                                    .size(8.dp)
+                                    .offset(y = 4.dp)
+                                    .background(
+                                        if (agent.online) OnlineGreen else OfflineRed,
+                                        RoundedCornerShape(50)
+                                    )
+                            )
+                            Column {
+                                Text(agent.display_name ?: agent.agent_id,
+                                    color = TextPrimary, fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium)
+                                agent.address?.let {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text("📍", fontSize = 10.sp)
+                                        Spacer(Modifier.width(2.dp))
+                                        Text(it, color = TextSecondary, fontSize = 10.sp)
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(4.dp))
+                    }
+                }
+            }
+        }
+
+        // ── Map WebView ───────────────────────────────────────────────────────
         AndroidView(
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.weight(1f).fillMaxHeight(),
             factory = { ctx ->
                 android.webkit.WebView(ctx).apply {
                     settings.javaScriptEnabled = true
@@ -742,11 +836,6 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                 }
             }
         )
-        FloatingActionButton(
-            onClick = { },
-            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
-            containerColor = AccentVoid
-        ) { Icon(Icons.Default.Add, null, tint = Color.White) }
     }
 }
 

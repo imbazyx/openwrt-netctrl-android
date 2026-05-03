@@ -83,6 +83,33 @@ document.addEventListener('DOMContentLoaded', function() {
   }
   setInterval(window.refreshAgents, 30000);
 });
+
+// ─── Pick Mode ───────────────────────────────────────────────────────────────
+var pickMode = false;
+var tempPickMarker = null;
+
+window.enterPickMode = function() {
+  pickMode = true;
+};
+
+window.exitPickMode = function() {
+  pickMode = false;
+  if (tempPickMarker) { map.removeLayer(tempPickMarker); tempPickMarker = null; }
+};
+
+map.on('click', function(e) {
+  if (!pickMode) return;
+  var lat = e.latlng.lat, lng = e.latlng.lng;
+  if (tempPickMarker) map.removeLayer(tempPickMarker);
+  tempPickMarker = L.marker([lat, lng], {
+    icon: L.divIcon({
+      html: '<div style="font-size:20px">📍</div>',
+      iconSize: [24, 24], iconAnchor: [12, 24], className: ''
+    })
+  }).addTo(map);
+  pickMode = false;
+  if (window.AndroidBridge) AndroidBridge.onLocationPicked(lat, lng);
+});
 </script>
 </body>
 </html>
