@@ -357,7 +357,90 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun setPickedLocation(lat: Double, lng: Double) {
-        _ui.update { it.copy(pickedLat = lat, pickedLng = lng) }
+        _ui.update { it.copy(
+            pickedLat = lat, pickedLng = lng,
+            addRouterLat = if (it.mapPickMode) lat else it.addRouterLat,
+            addRouterLng = if (it.mapPickMode) lng else it.addRouterLng,
+            mapPickMode = false,
+            screen = if (it.mapPickMode && it.addRouterOpen) Screen.AddRouter else it.screen
+        ) }
+    }
+
+    // ─── AddRouter ───────────────────────────────────────────────────────────────
+
+    fun openAddRouter() {
+        _ui.update { it.copy(
+            addRouterOpen = true, screen = Screen.AddRouter,
+            addRouterId = "", addRouterName = "", addRouterDesc = "",
+            addRouterIp = "", addRouterSshPass = "", addRouterAddress = "",
+            addRouterLat = null, addRouterLng = null, installAgentStatus = null
+        ) }
+    }
+
+    fun closeAddRouter() {
+        _ui.update { it.copy(addRouterOpen = false, screen = Screen.Dashboard, installAgentStatus = null) }
+    }
+
+    fun setAddRouterField(
+        id: String? = null, name: String? = null, desc: String? = null,
+        ip: String? = null, sshPass: String? = null, address: String? = null
+    ) {
+        _ui.update { s -> s.copy(
+            addRouterId      = id      ?: s.addRouterId,
+            addRouterName    = name    ?: s.addRouterName,
+            addRouterDesc    = desc    ?: s.addRouterDesc,
+            addRouterIp      = ip      ?: s.addRouterIp,
+            addRouterSshPass = sshPass ?: s.addRouterSshPass,
+            addRouterAddress = address ?: s.addRouterAddress
+        ) }
+    }
+
+    fun enterMapPickMode() {
+        _ui.update { it.copy(mapPickMode = true, screen = Screen.Map) }
+    }
+
+    fun cancelMapPick() {
+        _ui.update { it.copy(
+            mapPickMode = false,
+            screen = if (it.addRouterOpen) Screen.AddRouter else Screen.Map
+        ) }
+    }
+
+    fun installAgent() {
+        val s = _ui.value
+        val cmd = "curl -sL ${s.serverUrl}/api/v1/agents/install.sh | AGENT_ID=${s.addRouterId} sh"
+        _ui.update { it.copy(installAgentStatus = "CMD:$cmd") }
+    }
+
+    fun submitAddRouter() {
+        val s = _ui.value
+        if (s.addRouterId.isBlank() || s.addRouterIp.isBlank()) {
+            _ui.update { it.copy(installAgentStatus = "✗ Введите ID и IP роутера") }
+            return
+        }
+        viewModelScope.launch {
+            _ui.update { it.copy(installAgentStatus = "⏳ Подключаемся...") }
+            try {
+                val req = CreateAgentRequest(
+                    agent_id     = s.addRouterId,
+                    display_name = s.addRouterName.ifBlank { null },
+                    local_ip     = s.addRouterIp,
+                    lat          = s.addRouterLat,
+                    lng          = s.addRouterLng,
+                    description  = s.addRouterDesc.ifBlank { null },
+                    address      = s.addRouterAddress.ifBlank { null },
+                    ssh_host     = s.addRouterIp,
+                    ssh_port     = 22,
+                    ssh_user     = "root",
+                    ssh_password = s.addRouterSshPass.ifBlank { null }
+                )
+                buildApi(s.serverUrl).createAgent("Bearer ${s.token}", req)
+                _ui.update { it.copy(installAgentStatus = "✓ Агент ${s.addRouterId} зарегистрирован") }
+                refresh()
+            } catch (e: Exception) {
+                _ui.update { it.copy(installAgentStatus = "✗ ${e.message}") }
+            }
+        }
     }
 
     fun loadMetrics(agentId: String, hours: Int = 1) {
