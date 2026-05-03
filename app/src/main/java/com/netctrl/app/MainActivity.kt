@@ -187,7 +187,14 @@ fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
             }
         } else {
             items(ui.agents) { agent ->
-                AgentCard(agent, onClick = { vm.openDetail(agent) })
+                AgentCard(
+                    a = agent,
+                    onMetrics = { vm.loadMetrics(agent.agent_id, 1); vm.navigateTo(Screen.Metrics) },
+                    onSsh = { vm.navigateTo(Screen.SshTerminal(agent)) },
+                    onLuci = { vm.navigateTo(Screen.LuciView(agent)) },
+                    onSettings = { vm.openDetail(agent) },
+                    onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
+                )
             }
         }
     }
@@ -225,53 +232,156 @@ fun ServerStatusCard(ui: UiState) {
 }
 
 @Composable
-fun AgentCard(a: AgentFull, onClick: () -> Unit = {}) {
+fun AgentCard(
+    a: AgentFull,
+    onMetrics: () -> Unit = {},
+    onSsh: () -> Unit = {},
+    onLuci: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+
     Card(
-        modifier = Modifier.fillMaxWidth().clickable { onClick() },
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = CardBg)
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // Header row
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    Modifier.size(10.dp).background(
-                        if (a.online) OnlineGreen else OfflineRed,
-                        RoundedCornerShape(50)
-                    )
-                )
+                Box(Modifier.size(10.dp).background(
+                    if (a.online) OnlineGreen else OfflineRed, RoundedCornerShape(50)))
                 Spacer(Modifier.width(8.dp))
-                Text(
-                    a.display_name ?: a.agent_id,
-                    fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 16.sp
-                )
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (a.online) "Online" else "Offline",
-                    color = if (a.online) OnlineGreen else OfflineRed, fontSize = 12.sp
-                )
+                Text(a.display_name ?: a.agent_id,
+                    fontWeight = FontWeight.SemiBold, color = TextPrimary, fontSize = 16.sp,
+                    modifier = Modifier.weight(1f))
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (a.online) Color(0xFF0D2818) else Color(0xFF2D1215)
+                ) {
+                    Text(
+                        if (a.online) "online" else "offline",
+                        color = if (a.online) OnlineGreen else OfflineRed,
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
             }
-            if (a.address != null) Text(a.address, color = TextSecondary, fontSize = 12.sp)
-            if (a.local_ip != null) Text(a.local_ip, color = TextSecondary, fontSize = 11.sp)
 
-            if (a.online && a.metric != null) {
-                HorizontalDivider(color = DividerColor)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    StatItem("Load", "%.2f".format(a.metric.load1))
-                    StatItem("RAM", memPercent(a.metric.mem_free, a.metric.mem_total))
-                    StatItem("Temp", a.metric.temperature?.let { "%.0f°".format(it) } ?: "—")
-                    StatItem("WiFi", a.metric.wifi_clients?.toString() ?: "—")
+            // Address info
+            if (a.address != null || a.local_ip != null) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    a.address?.let {
+                        Text(it, color = TextSecondary, fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
+                    a.local_ip?.let {
+                        Text(it, color = TextSecondary, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
                 }
-                HorizontalDivider(color = DividerColor)
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-                    StatItem("Uptime", formatUptime(a.metric.uptime))
-                    StatItem("WAN↓", formatBytes(a.metric.wan_rx))
-                    StatItem("WAN↑", formatBytes(a.metric.wan_tx))
-                }
-            } else if (!a.online) {
-                val secs = a.last_seen_secs
-                if (secs != null)
-                    Text("Был онлайн: ${formatAgo(secs)} назад", color = TextSecondary, fontSize = 11.sp)
             }
+
+            // Metrics rows
+            if (a.online && a.metric != null) {
+                val m = a.metric
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    MetricRow("Load", "%.2f".format(m.load1))
+                    MetricRow("Mem", memPercent(m.mem_free, m.mem_total))
+                    MetricRow("Uptime", formatUptime(m.uptime))
+                    m.temperature?.let { MetricRow("Темп.", "%.1f°C".format(it)) }
+                    m.wifi_clients?.let { MetricRow("WiFi клиенты", it.toString()) }
+                    if (m.wan_rx != null || m.wan_tx != null)
+                        MetricRow("WAN ↕", "${formatBytes(m.wan_rx)} / ${formatBytes(m.wan_tx)}")
+                }
+            } else if (!a.online && a.last_seen_secs != null) {
+                Text("Был онлайн: ${formatAgo(a.last_seen_secs)} назад",
+                    color = TextSecondary, fontSize = 11.sp)
+            }
+
+            HorizontalDivider(color = DividerColor)
+
+            // Action buttons
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                AgentActionBtn(onClick = onMetrics) {
+                    Icon(Icons.Outlined.ShowChart, null,
+                        tint = AccentVoid, modifier = Modifier.size(16.dp))
+                }
+                AgentActionBtn(onClick = onSsh, enabled = a.online) {
+                    Text("SSH", fontSize = 11.sp,
+                        color = if (a.online) TextPrimary else TextSecondary)
+                }
+                AgentActionBtn(onClick = onLuci, enabled = a.online) {
+                    Text("LuCI", fontSize = 11.sp,
+                        color = if (a.online) TextPrimary else TextSecondary)
+                }
+                AgentActionBtn(onClick = onSettings) {
+                    Icon(Icons.Outlined.Settings, null,
+                        tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+                Spacer(Modifier.weight(1f))
+                AgentActionBtn(
+                    onClick = { confirmDelete = true },
+                    borderColor = OfflineRed.copy(alpha = 0.6f)
+                ) {
+                    Icon(Icons.Default.Close, null,
+                        tint = OfflineRed, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить агент?", color = TextPrimary) },
+            text = { Text(a.display_name ?: a.agent_id, color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = { confirmDelete = false; onDelete() },
+                    colors = ButtonDefaults.buttonColors(containerColor = OfflineRed)
+                ) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton({ confirmDelete = false }) { Text("Отмена", color = TextSecondary) }
+            },
+            containerColor = CardBg
+        )
+    }
+}
+
+@Composable
+fun MetricRow(label: String, value: String) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(label, color = TextSecondary, fontSize = 12.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        Text(value, color = TextPrimary, fontSize = 12.sp,
+            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    }
+}
+
+@Composable
+fun AgentActionBtn(
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+    borderColor: Color = Color(0xFF2A2250),
+    content: @Composable () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(6.dp),
+        color = Color(0xFF16133A),
+        border = androidx.compose.foundation.BorderStroke(1.dp, borderColor),
+        modifier = Modifier.height(30.dp)
+    ) {
+        Box(Modifier.padding(horizontal = 8.dp), contentAlignment = Alignment.Center) {
+            content()
         }
     }
 }
@@ -470,7 +580,14 @@ fun SshTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
             }
         } else {
             items(ui.agents) { agent ->
-                AgentCard(agent, onClick = { if (agent.online) selectedAgent = agent })
+                AgentCard(
+                    a = agent,
+                    onSsh = { if (agent.online) selectedAgent = agent },
+                    onMetrics = { vm.loadMetrics(agent.agent_id, 1); vm.navigateTo(Screen.Metrics) },
+                    onLuci = { vm.navigateTo(Screen.LuciView(agent)) },
+                    onSettings = { vm.openDetail(agent) },
+                    onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
+                )
             }
         }
     }
