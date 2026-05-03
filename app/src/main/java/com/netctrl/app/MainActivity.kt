@@ -1069,85 +1069,135 @@ fun MetricsTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
 
 @Composable
 fun AdminTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
-    var showCreateDialog by remember { mutableStateOf(false) }
+    var formUsername by remember { mutableStateOf("") }
+    var formPassword by remember { mutableStateOf("") }
+    var formConfirm  by remember { mutableStateOf("") }
+    var savedMsg by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(Unit) { if (ui.adminList.isEmpty()) vm.loadAdmins() }
 
     LazyColumn(
         Modifier.fillMaxSize().padding(pad),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(0.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp)
     ) {
+        // ── АДМИНИСТРАТОРЫ ────────────────────────────────────────────────────
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically) {
-                Text("Администраторы", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
-                FloatingActionButton(
-                    onClick = { showCreateDialog = true },
-                    containerColor = AccentVoid,
-                    modifier = Modifier.size(40.dp)
-                ) { Icon(Icons.Default.Add, null, tint = Color.White, modifier = Modifier.size(20.dp)) }
-            }
+            Text("АДМИНИСТРАТОРЫ",
+                color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
         }
         if (ui.adminLoading) {
             item {
-                Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AccentVoid)
+                Box(Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator(color = AccentVoid, modifier = Modifier.size(28.dp))
                 }
             }
         }
         if (ui.adminError != null) {
-            item { Text(ui.adminError, color = OfflineRed, fontSize = 13.sp) }
+            item {
+                Text(ui.adminError, color = OfflineRed, fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp))
+            }
         }
         items(ui.adminList) { admin ->
-            Card(
-                shape = RoundedCornerShape(12.dp),
-                colors = CardDefaults.cardColors(containerColor = CardBg),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(CardBg)
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     Icon(
-                        if (admin.role == "superadmin") Icons.Outlined.ManageAccounts else Icons.Outlined.Person,
-                        null, tint = if (admin.role == "superadmin") TrustGold else TextSecondary
+                        if (admin.role == "superadmin") Icons.Outlined.ManageAccounts
+                        else Icons.Outlined.Person,
+                        null,
+                        tint = if (admin.role == "superadmin") TrustGold else AccentVoid,
+                        modifier = Modifier.size(22.dp)
                     )
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(admin.username, color = TextPrimary, fontWeight = FontWeight.SemiBold)
-                        Text(admin.role, color = TextSecondary, fontSize = 12.sp)
-                    }
+                    Text(admin.username, color = TextPrimary, fontWeight = FontWeight.Medium,
+                        modifier = Modifier.weight(1f))
                     if (admin.username != ui.username) {
-                        IconButton(onClick = { vm.deleteAdmin(admin.username) }) {
-                            Icon(Icons.Default.Delete, null, tint = OfflineRed)
+                        Surface(
+                            onClick = { vm.deleteAdmin(admin.username) },
+                            shape = RoundedCornerShape(6.dp),
+                            color = Color.Transparent,
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp, OfflineRed.copy(alpha = 0.7f))
+                        ) {
+                            Icon(Icons.Default.Close, null, tint = OfflineRed,
+                                modifier = Modifier.padding(4.dp).size(18.dp))
                         }
                     }
                 }
+                HorizontalDivider(color = DividerColor)
             }
         }
-    }
 
-    if (showCreateDialog) {
-        var newUsername by remember { mutableStateOf("") }
-        var newPassword by remember { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { showCreateDialog = false },
-            title = { Text("Новый администратор", color = TextPrimary) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = newUsername, onValueChange = { newUsername = it },
-                        label = { Text("Username") }, colors = customOutlinedColors(), singleLine = true)
-                    OutlinedTextField(value = newPassword, onValueChange = { newPassword = it },
-                        label = { Text("Password") }, colors = customOutlinedColors(), singleLine = true,
-                        visualTransformation = PasswordVisualTransformation())
+        // ── ДОБАВИТЬ / ИЗМЕНИТЬ ПАРОЛЬ ────────────────────────────────────────
+        item { Spacer(Modifier.height(16.dp)) }
+        item {
+            Text("ДОБАВИТЬ / ИЗМЕНИТЬ ПАРОЛЬ",
+                color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
+        }
+        item {
+            Column(
+                Modifier.padding(horizontal = 16.dp).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedTextField(
+                    value = formUsername, onValueChange = { formUsername = it },
+                    label = { Text("Логин") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors(), singleLine = true
+                )
+                OutlinedTextField(
+                    value = formPassword, onValueChange = { formPassword = it },
+                    label = { Text("Пароль") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors(), singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                OutlinedTextField(
+                    value = formConfirm, onValueChange = { formConfirm = it },
+                    label = { Text("Подтвердить пароль") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors(), singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
+                )
+                if (savedMsg != null) {
+                    Text(savedMsg!!,
+                        color = if (savedMsg!!.startsWith("✓")) OnlineGreen else OfflineRed,
+                        fontSize = 13.sp)
                 }
-            },
-            confirmButton = {
                 Button(
-                    onClick = { vm.createAdmin(newUsername, newPassword); showCreateDialog = false },
-                    enabled = newUsername.isNotBlank() && newPassword.length >= 4,
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
-                ) { Text("Создать") }
-            },
-            dismissButton = { TextButton({ showCreateDialog = false }) { Text("Отмена", color = TextSecondary) } },
-            containerColor = CardBg
-        )
+                    onClick = {
+                        when {
+                            formUsername.isBlank() || formPassword.isBlank() ->
+                                savedMsg = "✗ Заполните поля"
+                            formPassword != formConfirm ->
+                                savedMsg = "✗ Пароли не совпадают"
+                            formPassword.length < 4 ->
+                                savedMsg = "✗ Пароль слишком короткий"
+                            else -> {
+                                vm.createAdmin(formUsername, formPassword)
+                                savedMsg = "✓ Сохранено"
+                                formUsername = ""; formPassword = ""; formConfirm = ""
+                            }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth().height(44.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
+                    enabled = formUsername.isNotBlank() && formPassword.isNotBlank()
+                ) { Text("Сохранить", fontWeight = FontWeight.SemiBold) }
+            }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
