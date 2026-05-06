@@ -121,6 +121,33 @@ data class CreateAgentRequest(
     val ssh_password: String? = null
 )
 
+data class AgentDetailMetrics(
+    val timestamp: Long?,
+    val cpu_load: Double?,
+    val ram_usage: Long?,
+    val ram_total: Long?,
+    val uptime: Long?,
+    val wifi_clients: Int?,
+    val wan_rx_bytes: Long?,
+    val wan_tx_bytes: Long?,
+    val node_peer_count: Int?,
+    val node_status: String?
+)
+
+data class AgentDetailData(
+    val agent_id: String,
+    val display_name: String?,
+    val local_ip: String?,
+    val luci_url: String?,
+    val lat: Double?,
+    val lng: Double?,
+    val description: String?,
+    val address: String?,
+    val online: Boolean,
+    val last_seen_secs: Long?,
+    val metrics: AgentDetailMetrics?
+)
+
 interface NetCtrlApi {
     @GET("health")
     suspend fun health(): Map<String, String>
@@ -204,6 +231,11 @@ interface NetCtrlApi {
         @Header("Authorization") bearer: String,
         @Path("id") id: String
     ): ApiResponse<Unit?>
+
+    @GET("api/v1/agents/{id}")
+    suspend fun getAgent(
+        @Path("id") id: String
+    ): ApiResponse<AgentDetailData>
 }
 
 fun buildApi(baseUrl: String): NetCtrlApi {
