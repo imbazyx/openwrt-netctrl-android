@@ -4,7 +4,12 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +26,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.*
 import androidx.compose.ui.unit.*
@@ -57,9 +64,15 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
         when (val screen = ui.screen) {
             is Screen.Login    -> LoginScreen(ui, vm::login)
             is Screen.Detail   -> DetailScreen(
-                agent = screen.agent, metrics = ui.detailMetrics,
+                agent = screen.agent,
+                agentDetail = ui.agentDetail,
+                detailLoading = ui.detailLoading,
+                metrics = ui.detailMetrics,
+                h3363tNodes = ui.h3363tNodes,
                 onBack = { vm.closeDetail() },
-                onOpenTerminal = { type -> vm.openAgentWeb(screen.agent, type) }
+                onOpenTerminal = { type -> vm.openAgentWeb(screen.agent, type) },
+                onMetrics = { vm.openMetrics(screen.agent.agent_id) },
+                onDelete = { vm.deleteAgentOnServer(screen.agent.agent_id) }
             )
             is Screen.SshTerminal -> SshTerminalScreen(
                 agent = screen.agent,
@@ -93,6 +106,7 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
                 onBack = { vm.navigateTo(Screen.Dashboard) }
             )
             is Screen.Web -> MainWebScreen(serverUrl = screen.url, token = ui.token, username = ui.username, onLogout = { vm.logout() })
+            is Screen.Metrics -> MetricsFullScreen(ui = ui, vm = vm, onBack = { vm.navigateTo(Screen.Dashboard) })
             else -> MainTabScaffold(ui = ui, vm = vm)
         }
     }
@@ -165,80 +179,214 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
 }
 
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
-    Column(Modifier.fillMaxSize().padding(pad)) {
-        // Sub-header row
-        Row(
-            Modifier
-                .fillMaxWidth()
-                .background(CardBg)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Text(
-                "РОУТЕРЫ (${ui.agents.size})",
-                color = TextSecondary, fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.weight(1f)
-            )
-            OutlinedButton(
-                onClick = { vm.refresh() },
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                modifier = Modifier.height(32.dp),
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
-            ) {
-                Icon(Icons.Default.Refresh, null, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Обновить", fontSize = 11.sp)
-            }
-            Button(
-                onClick = { vm.openAddRouter() },
-                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                modifier = Modifier.height(32.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
-            ) {
-                Text("+ Добавить", fontSize = 11.sp)
-            }
-        }
-        HorizontalDivider(color = DividerColor)
+    var contextMenuAgent by remember { mutableStateOf<AgentFull?>(null) }
+    var renameAgent by remember { mutableStateOf<AgentFull?>(null) }
+    var changeIpAgent by remember { mutableStateOf<AgentFull?>(null) }
+    var reinstallAgent by remember { mutableStateOf<AgentFull?>(null) }
+    var renameField by remember { mutableStateOf("") }
+    var ipField by remember { mutableStateOf("") }
+    val clipboardManager = LocalClipboardManager.current
 
-        LazyColumn(
-            Modifier.fillMaxSize(),
-            contentPadding = PaddingValues(12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            item { ServerStatusCard(ui) }
-            if (ui.agents.isEmpty()) {
-                item {
-                    Box(Modifier.fillMaxWidth().padding(vertical = 32.dp),
-                        contentAlignment = Alignment.Center) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Icon(Icons.Outlined.Router, null,
-                                tint = TextSecondary, modifier = Modifier.size(48.dp))
-                            Spacer(Modifier.height(8.dp))
-                            Text("Нет зарегистрированных агентов",
-                                color = TextSecondary, fontSize = 14.sp)
+    val filtered = remember(ui.agents, ui.searchQuery) {
+        if (ui.searchQuery.isBlank()) ui.agents
+        else ui.agents.filter { a ->
+            (a.display_name ?: a.agent_id).contains(ui.searchQuery, ignoreCase = true)
+                    || (a.local_ip ?: "").contains(ui.searchQuery)
+                    || (a.address ?: "").contains(ui.searchQuery, ignoreCase = true)
+        }
+    }
+
+    Box(Modifier.fillMaxSize().padding(pad)) {
+        Column(Modifier.fillMaxSize()) {
+            // Sub-header
+            Row(
+                Modifier.fillMaxWidth().background(CardBg).padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "РОУТЕРЫ (${ui.agents.size})",
+                    color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold
+                )
+            }
+            HorizontalDivider(color = DividerColor)
+
+            // Search bar (only when > 5 agents)
+            if (ui.agents.size > 5) {
+                OutlinedTextField(
+                    value = ui.searchQuery,
+                    onValueChange = { vm.setSearchQuery(it) },
+                    placeholder = { Text("Поиск роутера...", color = TextSecondary) },
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                    colors = customOutlinedColors(),
+                    singleLine = true,
+                    trailingIcon = {
+                        if (ui.searchQuery.isNotEmpty())
+                            IconButton(onClick = { vm.setSearchQuery("") }) {
+                                Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                            }
+                    }
+                )
+            }
+
+            LazyColumn(
+                Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 80.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                item { ServerStatusCard(ui) }
+                if (filtered.isEmpty()) {
+                    item {
+                        Box(Modifier.fillMaxWidth().padding(vertical = 32.dp), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Outlined.Router, null, tint = TextSecondary, modifier = Modifier.size(48.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text(
+                                    if (ui.agents.isEmpty()) "Нет зарегистрированных агентов" else "Ничего не найдено",
+                                    color = TextSecondary, fontSize = 14.sp
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    items(filtered, key = { it.agent_id }) { agent ->
+                        Box(Modifier.combinedClickable(
+                            onClick = { vm.openDetail(agent) },
+                            onLongClick = { contextMenuAgent = agent }
+                        )) {
+                            AgentCard(
+                                a = agent,
+                                onMetrics = { vm.openMetrics(agent.agent_id) },
+                                onSsh = { if (agent.online) vm.openSshTerminal(agent) },
+                                onLuci = { vm.openLuci(agent) },
+                                onSettings = { vm.openDetail(agent) },
+                                onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
+                            )
+                        }
+                        // Context menu dropdown
+                        DropdownMenu(
+                            expanded = contextMenuAgent?.agent_id == agent.agent_id,
+                            onDismissRequest = { contextMenuAgent = null },
+                            modifier = Modifier.background(CardBg)
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Переименовать", color = TextPrimary) },
+                                onClick = {
+                                    renameField = agent.display_name ?: agent.agent_id
+                                    renameAgent = agent
+                                    contextMenuAgent = null
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Edit, null, tint = AccentVoid) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Изменить IP", color = TextPrimary) },
+                                onClick = {
+                                    ipField = agent.local_ip ?: ""
+                                    changeIpAgent = agent
+                                    contextMenuAgent = null
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Wifi, null, tint = AccentVoid) }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Переустановить агент", color = TextPrimary) },
+                                onClick = {
+                                    reinstallAgent = agent
+                                    contextMenuAgent = null
+                                },
+                                leadingIcon = { Icon(Icons.Outlined.Download, null, tint = AccentVoid) }
+                            )
                         }
                     }
                 }
-            } else {
-                items(ui.agents) { agent ->
-                    AgentCard(
-                        a = agent,
-                        onMetrics = {
-                            vm.loadMetrics(agent.agent_id, 1)
-                            vm.navigateTo(Screen.Metrics)
-                        },
-                        onSsh = { vm.navigateTo(Screen.SshTerminal(agent)) },
-                        onLuci = { vm.navigateTo(Screen.LuciView(agent)) },
-                        onSettings = { vm.openDetail(agent) },
-                        onDelete = { vm.deleteAgentOnServer(agent.agent_id) }
-                    )
-                }
             }
         }
+
+        // FAB
+        FloatingActionButton(
+            onClick = { vm.openAddRouter() },
+            modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
+            containerColor = AccentVoid,
+            contentColor = Color.White
+        ) {
+            Icon(Icons.Default.Add, "Добавить роутер")
+        }
+    }
+
+    // Rename dialog
+    if (renameAgent != null) {
+        AlertDialog(
+            onDismissRequest = { renameAgent = null },
+            title = { Text("Переименовать", color = TextPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = renameField, onValueChange = { renameField = it },
+                    label = { Text("Новое имя") }, colors = customOutlinedColors(), singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { vm.renameAgent(renameAgent!!.agent_id, renameField); renameAgent = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
+                    enabled = renameField.isNotBlank()
+                ) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton({ renameAgent = null }) { Text("Отмена", color = TextSecondary) } },
+            containerColor = CardBg
+        )
+    }
+
+    // Change IP dialog
+    if (changeIpAgent != null) {
+        AlertDialog(
+            onDismissRequest = { changeIpAgent = null },
+            title = { Text("Изменить IP", color = TextPrimary) },
+            text = {
+                OutlinedTextField(
+                    value = ipField, onValueChange = { ipField = it },
+                    label = { Text("LAN IP роутера") }, colors = customOutlinedColors(), singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = { vm.updateAgentIp(changeIpAgent!!.agent_id, ipField); changeIpAgent = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
+                    enabled = ipField.isNotBlank()
+                ) { Text("Сохранить") }
+            },
+            dismissButton = { TextButton({ changeIpAgent = null }) { Text("Отмена", color = TextSecondary) } },
+            containerColor = CardBg
+        )
+    }
+
+    // Reinstall agent dialog
+    if (reinstallAgent != null) {
+        val agent = reinstallAgent!!
+        val s = ui
+        val cmd = "curl -sL ${s.serverUrl}/api/v1/agents/install.sh | AGENT_ID=${agent.agent_id} sh"
+        AlertDialog(
+            onDismissRequest = { reinstallAgent = null },
+            title = { Text("Переустановить агент", color = TextPrimary) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Выполните на роутере ${agent.display_name ?: agent.agent_id}:", color = TextSecondary, fontSize = 12.sp)
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(cmd, color = OnlineGreen, fontSize = 11.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { clipboardManager.setText(AnnotatedString(cmd)); reinstallAgent = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                ) { Text("Копировать") }
+            },
+            dismissButton = { TextButton({ reinstallAgent = null }) { Text("Закрыть", color = TextSecondary) } },
+            containerColor = CardBg
+        )
     }
 }
 
@@ -247,6 +395,7 @@ fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var showInstallDialog by remember { mutableStateOf(false) }
     val installCmd = if (ui.installAgentStatus?.startsWith("CMD:") == true)
         ui.installAgentStatus.removePrefix("CMD:") else null
+    val clipboardManager = LocalClipboardManager.current
 
     LaunchedEffect(ui.installAgentStatus) {
         if (ui.installAgentStatus?.startsWith("CMD:") == true) showInstallDialog = true
@@ -393,10 +542,18 @@ fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                 }
             },
             confirmButton = {
-                Button(
-                    onClick = { showInstallDialog = false },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
-                ) { Text("OK") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(installCmd ?: ""))
+                            showInstallDialog = false
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                    ) { Text("Копировать") }
+                    TextButton(onClick = { showInstallDialog = false }) {
+                        Text("Закрыть", color = TextSecondary)
+                    }
+                }
             },
             containerColor = CardBg
         )
@@ -592,28 +749,63 @@ fun AgentActionBtn(
 // ─── MAIN TAB SCAFFOLD ───────────────────────────────────────────────────────
 
 @Composable
-fun navItemColors() = NavigationBarItemDefaults.colors(
-    selectedIconColor = AccentVoid,
-    selectedTextColor = AccentVoid,
-    unselectedIconColor = TextSecondary,
-    unselectedTextColor = TextSecondary,
-    indicatorColor = Color(0xFF1E1A35)
-)
+fun RowScope.NavTab(label: String, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(
+                label,
+                color = if (selected) AccentVoid else TextSecondary,
+                fontSize = 14.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal
+            )
+            if (selected) {
+                Spacer(Modifier.height(3.dp))
+                Box(
+                    Modifier
+                        .width(28.dp)
+                        .height(2.dp)
+                        .background(AccentVoid, RoundedCornerShape(1.dp))
+                )
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
     val screen = ui.screen
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(ui.agentDeleteError) {
+        if (ui.agentDeleteError != null) {
+            scope.launch {
+                snackbarHostState.showSnackbar(
+                    message = "Ошибка: ${ui.agentDeleteError}",
+                    duration = SnackbarDuration.Short
+                )
+            }
+            vm.clearAgentDeleteError()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("⚡", fontSize = 18.sp)
-                        Text("H3363T NetCtrl", fontWeight = FontWeight.Bold, color = AccentVoid, fontSize = 17.sp)
+                        Text("H3363T", fontWeight = FontWeight.Bold, color = AccentVoid, fontSize = 17.sp)
+                        Text("NetCtrl", color = TextSecondary, fontSize = 14.sp)
                         if (ui.serverHealthOk) {
                             Box(Modifier.size(7.dp).background(OnlineGreen, RoundedCornerShape(50)))
-                            Text("онлайн", color = OnlineGreen, fontSize = 12.sp)
                         }
                     }
                 },
@@ -630,44 +822,23 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = CardBg, tonalElevation = 0.dp) {
-                val dashActive = screen is Screen.Dashboard || screen is Screen.AddRouter
-                NavigationBarItem(
-                    selected = dashActive,
-                    onClick = { vm.navigateTo(Screen.Dashboard) },
-                    icon = { Icon(Icons.Outlined.Router, null) },
-                    label = { Text("Роутеры", fontSize = 11.sp) },
-                    colors = navItemColors()
-                )
-                NavigationBarItem(
-                    selected = screen is Screen.Map,
-                    onClick = { vm.navigateTo(Screen.Map) },
-                    icon = { Icon(Icons.Outlined.Place, null) },
-                    label = { Text("Карта", fontSize = 11.sp) },
-                    colors = navItemColors()
-                )
-                NavigationBarItem(
-                    selected = screen is Screen.Ssh,
-                    onClick = { vm.navigateTo(Screen.Ssh) },
-                    icon = { Icon(Icons.Outlined.Code, null) },
-                    label = { Text("SSH", fontSize = 11.sp) },
-                    colors = navItemColors()
-                )
-                NavigationBarItem(
-                    selected = screen is Screen.Metrics,
-                    onClick = { vm.navigateTo(Screen.Metrics) },
-                    icon = { Icon(Icons.Outlined.ShowChart, null) },
-                    label = { Text("Метрики", fontSize = 11.sp) },
-                    colors = navItemColors()
-                )
-                if (ui.isSuperAdmin) {
-                    NavigationBarItem(
-                        selected = screen is Screen.Admin,
-                        onClick = { vm.navigateTo(Screen.Admin) },
-                        icon = { Icon(Icons.Outlined.ManageAccounts, null) },
-                        label = { Text("Админ", fontSize = 11.sp) },
-                        colors = navItemColors()
-                    )
+            Column {
+                HorizontalDivider(color = DividerColor)
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(CardBg)
+                        .height(52.dp)
+                        .navigationBarsPadding(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val dashActive = screen is Screen.Dashboard || screen is Screen.AddRouter
+                    NavTab("Роутеры", dashActive) { vm.navigateTo(Screen.Dashboard) }
+                    NavTab("Карта", screen is Screen.Map) { vm.navigateTo(Screen.Map) }
+                    if (ui.isSuperAdmin) {
+                        NavTab("Админ", screen is Screen.Admin) { vm.navigateTo(Screen.Admin) }
+                    }
                 }
             }
         },
@@ -675,8 +846,6 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
     ) { pad ->
         when (screen) {
             is Screen.Map       -> MapTabContent(ui, vm, pad)
-            is Screen.Ssh       -> SshTabContent(ui, vm, pad)
-            is Screen.Metrics   -> MetricsTabContent(ui, vm, pad)
             is Screen.Admin     -> AdminTabContent(ui, vm, pad)
             is Screen.AddRouter -> AddRouterContent(ui, vm, pad)
             else                -> RouterListTab(ui, vm, pad)
@@ -698,6 +867,7 @@ class MapBridge(private val vm: MainViewModel) {
                     put("online", a.online)
                     put("address", a.address ?: "")
                     put("local_ip", a.local_ip ?: "")
+                    put("luci_url", a.luci_url ?: "http://${a.local_ip ?: ""}")
                     a.lat?.let { put("lat", it) } ?: put("lat", org.json.JSONObject.NULL)
                     a.lng?.let { put("lng", it) } ?: put("lng", org.json.JSONObject.NULL)
                 }
@@ -712,8 +882,35 @@ class MapBridge(private val vm: MainViewModel) {
     }
 
     @android.webkit.JavascriptInterface
+    fun openLuci(agentId: String) {
+        val agent = vm.ui.value.agents.find { it.agent_id == agentId } ?: return
+        vm.openLuci(agent)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun openSsh(agentId: String) {
+        val agent = vm.ui.value.agents.find { it.agent_id == agentId } ?: return
+        if (agent.online) vm.openSshTerminal(agent)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun openMetrics(agentId: String) {
+        vm.openMetrics(agentId)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun deleteAgent(agentId: String) {
+        vm.deleteAgentOnServer(agentId)
+    }
+
+    @android.webkit.JavascriptInterface
     fun onLocationPicked(lat: Double, lng: Double) {
         vm.setPickedLocation(lat, lng)
+    }
+
+    @android.webkit.JavascriptInterface
+    fun onAddressPicked(address: String) {
+        if (address.isNotBlank()) vm.setAddRouterField(address = address)
     }
 }
 
@@ -722,6 +919,10 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     val agentsSnapshot = ui.agents
     val pickMode = ui.mapPickMode
+    var sidebarOpen by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = sidebarOpen) { sidebarOpen = false }
+    BackHandler(enabled = pickMode && !sidebarOpen) { vm.cancelMapPick() }
 
     LaunchedEffect(agentsSnapshot) {
         webViewRef?.evaluateJavascript("refreshAgents();", null)
@@ -731,113 +932,151 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
         else webViewRef?.evaluateJavascript("exitPickMode();", null)
     }
 
-    Row(Modifier.fillMaxSize().padding(pad)) {
-        // ── Left sidebar ─────────────────────────────────────────────────────
-        Column(
-            Modifier
-                .width(160.dp)
-                .fillMaxHeight()
-                .background(CardBg)
-        ) {
-            // Back button row
-            Row(
-                Modifier.fillMaxWidth().padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(
-                    onClick = { vm.navigateTo(Screen.Dashboard) },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Color(0xFF16133A), RoundedCornerShape(6.dp))
-                ) {
-                    Icon(Icons.Default.ArrowBack, null,
-                        tint = TextPrimary, modifier = Modifier.size(18.dp))
+    Box(Modifier.fillMaxSize().padding(pad)) {
+        // ── Full-screen map WebView ──────────────────────────────────────────
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                android.webkit.WebView.setWebContentsDebuggingEnabled(true)
+                android.webkit.WebView(ctx).apply {
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    @Suppress("SetJavaScriptEnabled")
+                    settings.javaScriptCanOpenWindowsAutomatically = false
+                    addJavascriptInterface(MapBridge(vm), "AndroidBridge")
+                    webViewClient = android.webkit.WebViewClient()
+                    webChromeClient = android.webkit.WebChromeClient()
+                    webViewRef = this
+                    loadUrl("file:///android_asset/map.html")
                 }
             }
+        )
 
-            if (pickMode) {
-                // Pick mode panel
-                Column(
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp)
-                        .background(Color(0xFF2A1020), RoundedCornerShape(8.dp))
-                        .padding(10.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+        // ── Sidebar overlay ──────────────────────────────────────────────────
+        AnimatedVisibility(
+            visible = sidebarOpen,
+            enter = slideInHorizontally { -it },
+            exit = slideOutHorizontally { -it }
+        ) {
+            Column(
+                Modifier
+                    .width(200.dp)
+                    .fillMaxHeight()
+                    .background(CardBg.copy(alpha = 0.96f))
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().padding(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text("📍", fontSize = 18.sp)
-                    Text("Кликни на карту чтобы назначить место",
-                        color = AccentVoid, fontSize = 12.sp)
-                    OutlinedButton(
-                        onClick = { vm.cancelMapPick() },
-                        modifier = Modifier.fillMaxWidth().height(32.dp),
-                        contentPadding = PaddingValues(0.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
-                    ) { Text("Отмена", fontSize = 12.sp) }
+                    Text("РОУТЕРЫ", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                    IconButton(
+                        onClick = { sidebarOpen = false },
+                        modifier = Modifier.size(30.dp)
+                    ) {
+                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                    }
                 }
-            } else {
-                // Router list
-                Text("РОУТЕРЫ",
-                    color = TextSecondary, fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
-                LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp)) {
-                    items(ui.agents) { agent ->
-                        Row(
-                            Modifier
-                                .fillMaxWidth()
-                                .clickable { vm.openDetail(agent) }
-                                .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.Top,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Box(
+                HorizontalDivider(color = DividerColor)
+
+                if (pickMode) {
+                    Column(
+                        Modifier.padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text("📍 Кликни на карту", color = AccentVoid, fontSize = 13.sp)
+                        OutlinedButton(
+                            onClick = { vm.cancelMapPick(); sidebarOpen = false },
+                            modifier = Modifier.fillMaxWidth().height(32.dp),
+                            contentPadding = PaddingValues(0.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
+                        ) { Text("Отмена", fontSize = 12.sp) }
+                    }
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
+                        items(ui.agents) { agent ->
+                            Row(
                                 Modifier
-                                    .size(8.dp)
-                                    .offset(y = 4.dp)
-                                    .background(
-                                        if (agent.online) OnlineGreen else OfflineRed,
-                                        RoundedCornerShape(50)
+                                    .fillMaxWidth()
+                                    .clickable { vm.openDetail(agent); sidebarOpen = false }
+                                    .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
+                                    .padding(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(8.dp)
+                                        .background(
+                                            if (agent.online) OnlineGreen else OfflineRed,
+                                            RoundedCornerShape(50)
+                                        )
+                                )
+                                Column(Modifier.weight(1f)) {
+                                    Text(
+                                        agent.display_name ?: agent.agent_id,
+                                        color = TextPrimary, fontSize = 12.sp,
+                                        fontWeight = FontWeight.Medium
                                     )
-                            )
-                            Column {
-                                Text(agent.display_name ?: agent.agent_id,
-                                    color = TextPrimary, fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium)
-                                agent.address?.let {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text("📍", fontSize = 10.sp)
-                                        Spacer(Modifier.width(2.dp))
+                                    agent.address?.let {
                                         Text(it, color = TextSecondary, fontSize = 10.sp)
                                     }
                                 }
                             }
+                            Spacer(Modifier.height(4.dp))
                         }
-                        Spacer(Modifier.height(4.dp))
                     }
                 }
             }
         }
 
-        // ── Map WebView ───────────────────────────────────────────────────────
-        AndroidView(
-            modifier = Modifier.weight(1f).fillMaxHeight(),
-            factory = { ctx ->
-                android.webkit.WebView(ctx).apply {
-                    settings.javaScriptEnabled = true
-                    settings.domStorageEnabled = true
-                    settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-                    addJavascriptInterface(MapBridge(vm), "AndroidBridge")
-                    webViewClient = android.webkit.WebViewClient()
-                    webChromeClient = android.webkit.WebChromeClient()
-                    webViewRef = this
-                    loadUrl("file:///android_asset/map.html?mode=view")
+        // ── Sidebar toggle button (top-left) ─────────────────────────────────
+        if (!sidebarOpen) {
+            Surface(
+                onClick = { sidebarOpen = true },
+                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
+                shape = RoundedCornerShape(8.dp),
+                color = CardBg.copy(alpha = 0.9f),
+                shadowElevation = 4.dp
+            ) {
+                Row(
+                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(Icons.Default.Menu, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
+                    Text("Роутеры", color = TextPrimary, fontSize = 12.sp)
                 }
             }
-        )
+        }
+
+        // ── Pick mode top banner ─────────────────────────────────────────────
+        if (pickMode) {
+            Box(
+                Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 10.dp)
+                    .background(Color(0xFF2A1020).copy(alpha = 0.95f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("📍 Тапните на карте для выбора места", color = AccentVoid, fontSize = 13.sp)
+                    IconButton(
+                        onClick = { vm.cancelMapPick() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                    }
+                }
+            }
+        }
     }
 }
+
 
 // ─── SSH TAB ──────────────────────────────────────────────────────────────────
 
@@ -974,11 +1213,34 @@ fun LuciViewScreen(agent: AgentFull, onBack: () -> Unit) {
     }
 }
 
+// ─── METRICS FULL SCREEN (standalone, navigated from Detail) ─────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MetricsFullScreen(ui: UiState, vm: MainViewModel, onBack: () -> Unit) {
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    val agentName = ui.agents.find { it.agent_id == ui.selectedMetricsAgentId }
+                        ?.let { it.display_name ?: it.agent_id } ?: "Метрики"
+                    Text(agentName, fontWeight = FontWeight.Bold, color = TextPrimary)
+                },
+                navigationIcon = { IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        MetricsTabContent(ui, vm, pad)
+    }
+}
+
 // ─── METRICS TAB ──────────────────────────────────────────────────────────────
 
 @Composable
 fun MetricsTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
-    var selectedAgentId by remember { mutableStateOf("") }
+    var selectedAgentId by remember(ui.selectedMetricsAgentId) { mutableStateOf(ui.selectedMetricsAgentId) }
     var timeRange by remember { mutableStateOf(1) }
     var dropdownExpanded by remember { mutableStateOf(false) }
 
@@ -1057,8 +1319,18 @@ fun MetricsTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
             item { ChartCard("WiFi клиенты", ui.detailMetrics, { it.wifi_clients?.toFloat() ?: 0f }, H3363tPurple, "") }
         } else if (selectedAgentId.isNotEmpty()) {
             item {
-                Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                    Text("Нет данных метрик", color = TextSecondary)
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Outlined.ShowChart, null, tint = TextSecondary, modifier = Modifier.size(40.dp))
+                            Text("Метрики недоступны", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                            Text("Установите пакет h3363t-metrics на роутере", color = TextSecondary, fontSize = 12.sp)
+                        }
+                    }
                 }
             }
         }
@@ -1670,11 +1942,23 @@ fun EventCard(event: H3363tEvent) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, onOpenTerminal: (String) -> Unit = {}) {
+fun DetailScreen(
+    agent: AgentFull,
+    agentDetail: AgentDetailData? = null,
+    detailLoading: Boolean = false,
+    metrics: List<Metric>,
+    h3363tNodes: List<H3363tNodeStatus> = emptyList(),
+    onBack: () -> Unit,
+    onOpenTerminal: (String) -> Unit = {},
+    onMetrics: () -> Unit = {},
+    onDelete: () -> Unit = {}
+) {
+    var confirmDelete by remember { mutableStateOf(false) }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(agent.display_name ?: agent.agent_id, fontWeight = FontWeight.Bold, color = TextPrimary) },
+                title = { Text(agentDetail?.display_name ?: agent.display_name ?: agent.agent_id, fontWeight = FontWeight.Bold, color = TextPrimary) },
                 navigationIcon = {
                     IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) }
                 },
@@ -1683,30 +1967,57 @@ fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, on
         },
         containerColor = BgDark
     ) { pad ->
+        val isOnline = agentDetail?.online ?: agent.online
+
+        if (detailLoading && agentDetail == null) {
+            Box(Modifier.fillMaxSize().padding(pad), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = AccentVoid)
+            }
+            return@Scaffold
+        }
+
         LazyColumn(
             Modifier.fillMaxSize().padding(pad),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+            // Action buttons
             item {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(
                         onClick = { onOpenTerminal("__terminal__") },
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
-                        enabled = agent.online
-                    ) { Text("SSH терминал", color = TextPrimary, fontSize = 13.sp) }
-                    if (agent.luci_url != null) {
-                        Button(
-                            onClick = { onOpenTerminal("__luci__") },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
-                            enabled = agent.online
-                        ) { Text("LuCI", color = TextPrimary, fontSize = 13.sp) }
+                        enabled = isOnline
+                    ) {
+                        Icon(Icons.Outlined.Code, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("SSH", color = TextPrimary, fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick = { onOpenTerminal("__luci__") },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                        enabled = isOnline
+                    ) {
+                        Icon(Icons.Outlined.OpenInBrowser, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("LuCI", color = TextPrimary, fontSize = 13.sp)
+                    }
+                    Button(
+                        onClick = onMetrics,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                        enabled = isOnline
+                    ) {
+                        Icon(Icons.Outlined.ShowChart, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Метрики", color = TextPrimary, fontSize = 13.sp)
                     }
                 }
             }
 
+            // Status card
             item {
                 Card(shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = CardBg),
@@ -1714,40 +2025,132 @@ fun DetailScreen(agent: AgentFull, metrics: List<Metric>, onBack: () -> Unit, on
                     Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(10.dp).background(
-                                if (agent.online) OnlineGreen else OfflineRed, RoundedCornerShape(50)))
+                                if (isOnline) OnlineGreen else OfflineRed, RoundedCornerShape(50)))
                             Spacer(Modifier.width(8.dp))
-                            Text(if (agent.online) "Online" else "Offline",
-                                color = if (agent.online) OnlineGreen else OfflineRed,
+                            Text(if (isOnline) "Online" else "Offline",
+                                color = if (isOnline) OnlineGreen else OfflineRed,
                                 fontWeight = FontWeight.SemiBold)
                         }
-                        if (agent.address != null) InfoRow("Адрес", agent.address)
-                        if (agent.local_ip != null) InfoRow("IP", agent.local_ip)
-                        agent.metric?.let { m ->
+                        val displayIp = agentDetail?.local_ip ?: agent.local_ip
+                        val displayAddr = agentDetail?.address ?: agent.address
+                        if (displayAddr != null) InfoRow("Адрес", displayAddr)
+                        if (displayIp != null) InfoRow("IP (LAN)", displayIp)
+
+                        agentDetail?.metrics?.let { m ->
+                            m.uptime?.let { InfoRow("Uptime", formatUptime(it.toDouble())) }
+                            m.cpu_load?.let { InfoRow("CPU Load", "%.2f".format(it)) }
+                            if (m.ram_usage != null && m.ram_total != null && m.ram_total > 0) {
+                                val pct = m.ram_usage * 100 / m.ram_total
+                                InfoRow("RAM", "${m.ram_usage}/${m.ram_total} MB ($pct%)")
+                            }
+                            m.wifi_clients?.let { InfoRow("WiFi клиенты", it.toString()) }
+                            if (m.wan_rx_bytes != null || m.wan_tx_bytes != null)
+                                InfoRow("WAN", "↓${formatBytes(m.wan_rx_bytes)}  ↑${formatBytes(m.wan_tx_bytes)}")
+                            m.node_status?.let { InfoRow("H3363T нода", it) }
+                            m.node_peer_count?.let { InfoRow("Пиры", it.toString()) }
+                        } ?: agent.metric?.let { m ->
                             InfoRow("Uptime", formatUptime(m.uptime))
-                            InfoRow("Температура", m.temperature?.let { "%.1f°C".format(it) } ?: "—")
-                            InfoRow("WiFi клиенты", m.wifi_clients?.toString() ?: "—")
-                            InfoRow("WAN ↓", formatBytes(m.wan_rx))
-                            InfoRow("WAN ↑", formatBytes(m.wan_tx))
+                            InfoRow("Load", "%.2f".format(m.load1))
+                            InfoRow("RAM %", memPercent(m.mem_free, m.mem_total))
+                            m.temperature?.let { InfoRow("Температура", "%.1f°C".format(it)) }
+                            m.wifi_clients?.let { InfoRow("WiFi клиенты", it.toString()) }
+                            if (m.wan_rx != null || m.wan_tx != null)
+                                InfoRow("WAN", "↓${formatBytes(m.wan_rx)}  ↑${formatBytes(m.wan_tx)}")
                         }
                     }
                 }
             }
 
+            // Metrics preview (last 1h)
             if (metrics.isNotEmpty()) {
                 item { ChartCard("Load Average", metrics, { it.load1.toFloat() }, AccentVoid, "") }
-                item { ChartCard("RAM %", metrics, { m ->
-                    val total = m.mem_total ?: 1L
-                    if (total == 0L) 0f else ((total - m.mem_free).toFloat() / total * 100f)
-                }, Color(0xFF7EE787), "%", 100f) }
+                item {
+                    ChartCard("RAM %", metrics, { m ->
+                        val total = m.mem_total ?: 1L
+                        if (total == 0L) 0f else ((total - m.mem_free).toFloat() / total * 100f)
+                    }, Color(0xFF7EE787), "%", 100f)
+                }
                 item { ChartCard("Температура °C", metrics, { it.temperature ?: 0f }, Color(0xFFFF7B72), "°") }
             } else if (agent.online) {
                 item {
-                    Box(Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = AccentVoid)
+                    Card(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(containerColor = CardBg),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(Modifier.fillMaxWidth().padding(20.dp), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(Icons.Outlined.ShowChart, null, tint = TextSecondary, modifier = Modifier.size(36.dp))
+                                Spacer(Modifier.height(8.dp))
+                                Text("Метрики недоступны", color = TextSecondary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Установите пакет h3363t-metrics на роутере", color = TextSecondary, fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
+
+            // H3363T node status
+            item {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Outlined.Security, null, tint = H3363tPurple, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("H3363T Нода", color = TextPrimary, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        }
+                        HorizontalDivider(color = DividerColor)
+                        if (h3363tNodes.isNotEmpty()) {
+                            val node = h3363tNodes[0]
+                            InfoRow("Пиры", node.peer_count.toString())
+                            InfoRow("Feed", formatFeedSize(node.feed_size))
+                            InfoRow("Uptime", formatUptime(node.uptime_sec.toDouble()))
+                            InfoRow("OSIIS", if (node.osiis_active) "Active" else "Inactive")
+                            InfoRow("Trust", "${node.trust_level}/100")
+                        } else {
+                            Box(Modifier.fillMaxWidth().padding(vertical = 8.dp), contentAlignment = Alignment.Center) {
+                                Text("Агент H3363T не запущен", color = TextSecondary, fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Delete button
+            item {
+                OutlinedButton(
+                    onClick = { confirmDelete = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = OfflineRed)
+                ) {
+                    Icon(Icons.Default.Delete, null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Удалить роутер")
+                }
+            }
         }
+    }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Удалить роутер?", color = TextPrimary) },
+            text = { Text(agent.display_name ?: agent.agent_id, color = TextSecondary) },
+            confirmButton = {
+                Button(
+                    onClick = { confirmDelete = false; onDelete() },
+                    colors = ButtonDefaults.buttonColors(containerColor = OfflineRed)
+                ) { Text("Удалить") }
+            },
+            dismissButton = {
+                TextButton({ confirmDelete = false }) { Text("Отмена", color = TextSecondary) }
+            },
+            containerColor = CardBg
+        )
     }
 }
 
