@@ -17,6 +17,9 @@ data class UiState(
     val adminError: String? = null,
     val metricsLoading: Boolean = false,
     val selectedMetricsAgentId: String = "",
+    val detailLoading: Boolean = false,
+    val agentDeleteError: String? = null,
+    val agentDetail: AgentDetailData? = null,
     val pickedLat: Double? = null,
     val pickedLng: Double? = null,
     // Add Router form
@@ -31,13 +34,19 @@ data class UiState(
     val addRouterLng: Double? = null,
     val installAgentStatus: String? = null,
     val mapPickMode: Boolean = false,
+    // H3363T
     val h3363tNodes: List<H3363tNodeStatus> = emptyList(),
     val h3363tEvents: List<H3363tEvent> = emptyList(),
     val h3363tLoading: Boolean = false,
     val h3363tError: String? = null,
     val h3363tConnected: Boolean = false,
     val h3363tCommandResult: String? = null,
+    // Local node
     val localNodeConnected: Boolean = false,
     val localNodePeerCount: Int = 0,
     val localNodeLoading: Boolean = false,
+    // Map sidebar (overlay toggle)
+    val sidebarOpen: Boolean = false,
+    // Router list search
+    val searchQuery: String = "",
 )

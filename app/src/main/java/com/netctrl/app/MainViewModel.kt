@@ -38,7 +38,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     _ui.update {
                         it.copy(
                             token = token, serverUrl = url,
-                            username = name ?: "", screen = Screen.Dashboard
+                            username = name ?: "", screen = Screen.Dashboard,
+                            isSuperAdmin = decodeJwtRole(token) == "superadmin"
                         )
                     }
                     connectH3363tWs(url, token)
@@ -100,6 +101,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun navigateTo(screen: Screen) {
         _ui.update { it.copy(screen = screen) }
         when (screen) {
+            is Screen.Dashboard -> refresh()
             is Screen.H3363TNode -> loadH3363tData()
             is Screen.Admin -> loadAdmins()
             is Screen.LocalNode -> {
@@ -115,12 +117,33 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun openDetail(agent: AgentFull) {
-        _ui.update { it.copy(selectedAgent = agent, detailMetrics = emptyList(), screen = Screen.Detail(agent)) }
+        _ui.update { it.copy(
+            selectedAgent = agent,
+            detailMetrics = emptyList(),
+            agentDetail = null,
+            detailLoading = true,
+            screen = Screen.Detail(agent)
+        ) }
+        loadAgentDetail(agent.agent_id)
         if (agent.online) loadDetailMetrics(agent.agent_id)
+        loadH3363tData()
+    }
+
+    private fun loadAgentDetail(agentId: String) {
+        val s = _ui.value
+        viewModelScope.launch {
+            try {
+                val api = buildApi(s.serverUrl)
+                val response = api.getAgent(agentId)
+                _ui.update { it.copy(agentDetail = response.data, detailLoading = false) }
+            } catch (e: Exception) {
+                _ui.update { it.copy(detailLoading = false) }
+            }
+        }
     }
 
     fun closeDetail() {
-        _ui.update { it.copy(selectedAgent = null, detailMetrics = emptyList(), screen = Screen.Dashboard) }
+        _ui.update { it.copy(selectedAgent = null, detailMetrics = emptyList(), agentDetail = null, screen = Screen.Dashboard) }
     }
 
     // ─── OpenWRT Agents ───
@@ -476,12 +499,77 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun deleteAgentOnServer(agentId: String) {
         val s = _ui.value
+        if (s.token.isBlank()) {
+            _ui.update { it.copy(agentDeleteError = "Не авторизован") }
+            return
+        }
         viewModelScope.launch {
             try {
-                buildApi(s.serverUrl).deleteAgent("Bearer ${s.token}", agentId)
+                val resp = buildApi(s.serverUrl).deleteAgent("Bearer ${s.token}", agentId)
+                if (resp.success) {
+                    loadAgents(s.serverUrl, s.token)
+                    val cur = _ui.value.screen
+                    if (cur is Screen.Detail && cur.agent.agent_id == agentId)
+                        _ui.update { it.copy(screen = Screen.Dashboard, selectedAgent = null, agentDetail = null) }
+                } else {
+                    _ui.update { it.copy(agentDeleteError = resp.message ?: "Ошибка удаления") }
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(agentDeleteError = e.message ?: "Ошибка сети") }
+            }
+        }
+    }
+
+    fun clearAgentDeleteError() {
+        _ui.update { it.copy(agentDeleteError = null) }
+    }
+
+    fun renameAgent(agentId: String, newName: String) {
+        val s = _ui.value
+        viewModelScope.launch {
+            try {
+                buildApi(s.serverUrl).createAgent(
+                    "Bearer ${s.token}",
+                    CreateAgentRequest(agent_id = agentId, display_name = newName)
+                )
                 loadAgents(s.serverUrl, s.token)
             } catch (_: Exception) {}
         }
+    }
+
+    fun updateAgentIp(agentId: String, newIp: String) {
+        val s = _ui.value
+        viewModelScope.launch {
+            try {
+                buildApi(s.serverUrl).createAgent(
+                    "Bearer ${s.token}",
+                    CreateAgentRequest(agent_id = agentId, local_ip = newIp, ssh_host = newIp)
+                )
+                loadAgents(s.serverUrl, s.token)
+            } catch (_: Exception) {}
+        }
+    }
+
+    fun setSidebarOpen(open: Boolean) {
+        _ui.update { it.copy(sidebarOpen = open) }
+    }
+
+    fun setSearchQuery(q: String) {
+        _ui.update { it.copy(searchQuery = q) }
+    }
+
+    fun openSshTerminal(agent: AgentFull) {
+        _ui.update { it.copy(screen = Screen.SshTerminal(agent)) }
+    }
+
+    fun openLuci(agent: AgentFull) {
+        _ui.update { it.copy(screen = Screen.LuciView(agent)) }
+    }
+
+    fun openMetrics(agentId: String) {
+        _ui.update { it.copy(selectedMetricsAgentId = agentId) }
+        loadMetrics(agentId, 1)
+        navigateTo(Screen.Metrics)
     }
 
     override fun onCleared() {
