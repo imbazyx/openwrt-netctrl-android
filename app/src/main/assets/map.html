@@ -1,11 +1,11 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #050410; overflow: hidden; }
-#map { width: 100vw; height: 100vh; }
+#map { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
 .leaflet-popup-content-wrapper {
   background: #0D0B1E; color: #C0B0F0;
   border: 1px solid #2A2250; border-radius: 10px;
@@ -45,7 +45,7 @@ body { background: #050410; overflow: hidden; }
   padding: 7px 16px; border-radius: 6px; cursor: pointer; flex: 1; font-size: 13px;
 }
 </style>
-<link rel="stylesheet" href="leaflet.min.css">
+<link rel="stylesheet" href="leaflet.min.css" />
 </head>
 <body>
 <div id="map"></div>
@@ -61,6 +61,18 @@ body { background: #050410; overflow: hidden; }
 </div>
 <script src="leaflet.min.js"></script>
 <script>
+// Console bridge for Android
+if (window.AndroidBridge && !window.console) window.console = {};
+if (window.AndroidBridge) {
+  var _origLog = console.log || function(){};
+  console.log = function(m) {
+    try { AndroidBridge.log(typeof m === 'object' ? JSON.stringify(m) : String(m)); } catch(e){}
+    _origLog.apply(console, arguments);
+  };
+}
+console.log('Map HTML loaded, AndroidBridge=' + (window.AndroidBridge ? 'OK' : 'MISSING'));
+console.log('L (Leaflet) = ' + (typeof L !== 'undefined' ? 'OK' : 'UNDEFINED'));
+console.log('map div = ' + (document.getElementById('map') ? 'OK' : 'NULL'));
 function showMapError(msg) {
   var el = document.getElementById('tile-error');
   el.innerHTML = '&#9888; ' + (msg || 'Карта недоступна без интернета');
@@ -78,6 +90,23 @@ try {
     if (!tileErrorShown) { tileErrorShown = true; showMapError('Карта недоступна без интернета'); }
   });
   tiles.addTo(map);
+  console.log('Map initialized, center=' + map.getCenter() + ' zoom=' + map.getZoom());
+function resizeMap() {
+  var w = window.innerWidth || document.documentElement.clientWidth;
+  var h = window.innerHeight || document.documentElement.clientHeight;
+  document.getElementById('map').style.width = w + 'px';
+  document.getElementById('map').style.height = h + 'px';
+  if (map) map.invalidateSize();
+}
+resizeMap();
+window.addEventListener('resize', resizeMap);
+setTimeout(resizeMap, 500);
+var computedStyle = window.getComputedStyle(document.getElementById('map'));
+console.log('Map bg=' + computedStyle.backgroundColor + ' width=' + computedStyle.width + ' height=' + computedStyle.height);
+setTimeout(function() {
+  var tiles = document.querySelectorAll('.leaflet-tile');
+  console.log('Tiles loaded count=' + tiles.length);
+}, 2000);
 } catch(e) {
   showMapError('Ошибка инициализации карты');
 }
@@ -99,6 +128,20 @@ function makePopupHtml(a) {
   html += `<div class="${statusCls}">${statusTxt}</div>`;
   if (a.address) html += `<div class="popup-meta">📍 ${a.address}</div>`;
   if (a.local_ip) html += `<div class="popup-meta">IP: ${a.local_ip}</div>`;
+  
+  // Метрики
+  if (a.cpu_load != null) {
+    html += `<div class="popup-meta">CPU Load: ${a.cpu_load.toFixed(2)}</div>`;
+  }
+  if (a.mem_total && a.mem_total > 0 && a.mem_free != null) {
+    const usedMem = Math.round((a.mem_total - a.mem_free) / 1024);
+    const totalMem = Math.round(a.mem_total / 1024);
+    html += `<div class="popup-meta">RAM: ${usedMem}/${totalMem} MB</div>`;
+  }
+  if (a.temperature && a.temperature > 0) {
+    html += `<div class="popup-meta">Temp: ${a.temperature.toFixed(1)}°C</div>`;
+  }
+
   html += `<div class="popup-actions">`;
   html += `<button class="popup-btn" onclick="if(window.AndroidBridge)AndroidBridge.openLuci('${id}')">LuCI</button>`;
   html += `<button class="popup-btn" onclick="if(window.AndroidBridge)AndroidBridge.openSsh('${id}')">SSH</button>`;
