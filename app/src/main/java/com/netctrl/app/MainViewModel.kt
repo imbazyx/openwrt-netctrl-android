@@ -583,6 +583,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openNativeSsh(agent: AgentFull) {
         sshSession?.disconnect()
+        val s = _ui.value
+        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+        val host = localSettings.ip.ifBlank { agent.local_ip ?: "" }
+        val port = localSettings.sshPort
+        val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
+        val pass = credentialStore.getSshPass(agent.agent_id)
         sshSession = SshSessionManager(viewModelScope).also { mgr ->
             viewModelScope.launch {
                 mgr.output.collect { out -> _ui.update { it.copy(sshOutput = out) } }
@@ -590,15 +596,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch {
                 mgr.connected.collect { c -> _ui.update { it.copy(sshConnected = c, sshConnecting = false) } }
             }
+            _ui.update { it.copy(sshOutput = "", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
+            mgr.connect(host, port, login, pass)
         }
-        val s = _ui.value
-        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
-        val host = localSettings.ip.ifBlank { agent.local_ip ?: "" }
-        val port = localSettings.sshPort
-        val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
-        val pass = credentialStore.getSshPass(agent.agent_id)
-        _ui.update { it.copy(sshOutput = "", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
-        sshSession!!.connect(host, port, login, pass)
     }
 
     fun sshSendLine(line: String) { sshSession?.sendLine(line) }
@@ -620,9 +620,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun saveAgentLocalSettings(agentId: String, settings: AgentLocalSettings) {
+        val s = _ui.value
         viewModelScope.launch {
             agentLocalPrefs.save(agentId, settings)
-            val s = _ui.value
             fetchAgents(s.serverUrl, s.token)
         }
     }
@@ -668,5 +668,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         wsManager?.disconnect()
         localNodeManager.disconnect()
+        sshSession?.disconnect()
+        sshSession = null
     }
 }

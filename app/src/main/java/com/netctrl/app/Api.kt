@@ -21,8 +21,8 @@ data class OWMAgent(
     val online: Boolean,
     val last_seen_secs: Long?,
     val cpu_load: Double?,
-    val ram_usage: Long?,
-    val ram_total: Long?,
+    val ram_usage: Long?,   // MB
+    val ram_total: Long?,   // MB
     val wifi_clients: Int? = null
 )
 

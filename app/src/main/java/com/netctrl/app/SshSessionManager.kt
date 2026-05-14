@@ -67,7 +67,7 @@ class SshSessionManager(private val scope: CoroutineScope) {
 
     private fun stripAnsi(text: String): String = text
         .replace(Regex("\\u001B\\[[0-9;]*[A-Za-z]"), "")
-        .replace(Regex("\\u001B\\][^]*"), "")
+        .replace(Regex("\\u001B\\][\\s\\S]*?(?:\\u0007|\\u001B\\\\)"), "")
         .replace(Regex("\\u001B[()][AB012]"), "")
 
     private fun appendOutput(text: String) {
