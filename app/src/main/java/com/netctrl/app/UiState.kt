@@ -49,4 +49,15 @@ data class UiState(
     val sidebarOpen: Boolean = false,
     // Router list search
     val searchQuery: String = "",
+    // OWM v2 agents (new API format)
+    val owmAgents: List<OWMAgent> = emptyList(),
+    val agentLocalMap: Map<String, AgentLocalSettings> = emptyMap(),
+    // Router card (long press on bottom sheet agent)
+    val routerCardAgent: AgentFull? = null,
+    // Per-agent settings screen
+    val agentSettingsId: String? = null,
+    // Native SSH terminal state
+    val sshOutput: String = "",
+    val sshConnected: Boolean = false,
+    val sshConnecting: Boolean = false,
 )
