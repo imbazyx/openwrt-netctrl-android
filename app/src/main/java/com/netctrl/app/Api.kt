@@ -15,6 +15,17 @@ data class AgentInfo(
     val last_seen_secs: Long?
 )
 
+data class OWMAgent(
+    val agent_id: String,
+    val agent_name: String,
+    val online: Boolean,
+    val last_seen_secs: Long?,
+    val cpu_load: Double?,
+    val ram_usage: Long?,
+    val ram_total: Long?,
+    val wifi_clients: Int? = null
+)
+
 data class RouterConfig(
     val agent_id: String,
     val display_name: String?,
@@ -156,7 +167,7 @@ interface NetCtrlApi {
     suspend fun login(@Body req: LoginRequest): LoginResponse
 
     @GET("agents")
-    suspend fun agents(@Header("Authorization") bearer: String): ApiResponse<List<AgentInfo>>
+    suspend fun agents(@Header("Authorization") bearer: String): ApiResponse<List<OWMAgent>>
 
     @GET("configs")
     suspend fun configs(@Header("Authorization") bearer: String): ApiResponse<List<RouterConfig>>
