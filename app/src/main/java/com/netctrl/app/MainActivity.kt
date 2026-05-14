@@ -1169,11 +1169,12 @@ fun LuciViewScreen(agent: AgentFull, credentialStore: CredentialStore, onBack: (
                     settings.useWideViewPort = true
                     webChromeClient = android.webkit.WebChromeClient()
                     webViewClient = object : android.webkit.WebViewClient() {
+                        var injected = false
                         override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
                             super.onPageFinished(view, url)
-                            if (luciPass.isNotBlank()) {
-                                val escapedLogin = luciLogin.replace("\\", "\\\\").replace("'", "\\'")
-                                val escapedPass = luciPass.replace("\\", "\\\\").replace("'", "\\'")
+                            if (!injected && luciPass.isNotBlank()) {
+                                val escapedLogin = luciLogin.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
+                                val escapedPass = luciPass.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "\\r")
                                 val js = """
                                     (function() {
                                         var pwField = document.querySelector('input[type=password]');
@@ -1183,15 +1184,19 @@ fun LuciViewScreen(agent: AgentFull, credentialStore: CredentialStore, onBack: (
                                         pwField.value = '$escapedPass';
                                         var form = pwField.closest('form');
                                         if (form) form.submit();
+                                        return true;
                                     })();
                                 """.trimIndent()
-                                view?.evaluateJavascript(js, null)
+                                view?.evaluateJavascript(js) { result ->
+                                    if (result == "true") injected = true
+                                }
                             }
                         }
                     }
                     loadUrl(luciUrl)
                 }
-            }
+            },
+            onRelease = { it.destroy() }
         )
     }
 }
