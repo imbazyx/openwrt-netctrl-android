@@ -109,6 +109,10 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
             is Screen.Metrics -> MetricsFullScreen(ui = ui, vm = vm, onBack = { vm.navigateTo(Screen.Dashboard) })
             else -> MainTabScaffold(ui = ui, vm = vm)
         }
+        // Router card overlay (shown above any screen)
+        ui.routerCardAgent?.let { agent ->
+            RouterCard(agent = agent, ui = ui, vm = vm, onDismiss = { vm.closeRouterCard() })
+        }
     }
 }
 
@@ -2386,5 +2390,110 @@ fun AgentBottomSheetRow(
             Modifier.size(6.dp)
                 .background(if (agent.online) OnlineGreen else OfflineRed, RoundedCornerShape(50))
         )
+    }
+}
+
+// ─── ROUTER CARD ─────────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun RouterCard(
+    agent: AgentFull,
+    ui: UiState,
+    vm: MainViewModel,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color(0xFF0D0B1E),
+        shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            // Sub-header
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        agent.display_name ?: agent.agent_id,
+                        color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold
+                    )
+                    val local = ui.agentLocalMap[agent.agent_id]
+                    val nowSecs = System.currentTimeMillis() / 1000
+                    val secsAgo = agent.last_seen_secs?.let { nowSecs - it }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            Modifier.size(8.dp)
+                                .background(if (agent.online) Color(0xFF00FF88) else Color(0xFFFF4444), RoundedCornerShape(50))
+                        )
+                        Text(
+                            if (agent.online) "Онлайн"
+                            else secsAgo?.let { "Офлайн (${it / 60} мин назад)" } ?: "Офлайн",
+                            color = if (agent.online) Color(0xFF00FF88) else Color(0xFFFF4444),
+                            fontSize = 12.sp
+                        )
+                    }
+                    if (!local?.ip.isNullOrBlank()) {
+                        Text(local?.ip ?: "", color = TextSecondary, fontSize = 12.sp)
+                    }
+                    val wifiClients = agent.metric?.wifi_clients
+                    if (wifiClients != null) {
+                        Text("WiFi клиенты: $wifiClients", color = TextSecondary, fontSize = 12.sp)
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+            HorizontalDivider(color = Color(0xFF2A2250))
+            Spacer(Modifier.height(16.dp))
+
+            // Action buttons
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { onDismiss(); vm.openNativeSsh(agent) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                    modifier = Modifier.weight(1f)
+                ) { Text("SSH", color = AccentVoid) }
+                Button(
+                    onClick = { onDismiss(); vm.openLuci(agent) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                    modifier = Modifier.weight(1f)
+                ) { Text("LuCI", color = TextPrimary) }
+                Button(
+                    onClick = { onDismiss(); vm.openAgentSettings(agent.agent_id) },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                    modifier = Modifier.weight(1f)
+                ) { Text("Настройки", color = TextSecondary) }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Metrics
+            agent.metric?.let { m ->
+                Text("Метрики", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(8.dp))
+                MetricRow("Load", "%.2f".format(m.load1))
+                if (m.mem_total != null && m.mem_total > 0) {
+                    val usedMb = (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L
+                    val totalMb = m.mem_total / 1024L / 1024L
+                    MetricRow("RAM", "$usedMb / $totalMb MB")
+                }
+                m.wifi_clients?.let { MetricRow("WiFi клиенты", "$it") }
+                m.temperature?.let { MetricRow("Температура", "${it.toInt()}°C") }
+            }
+        }
     }
 }
