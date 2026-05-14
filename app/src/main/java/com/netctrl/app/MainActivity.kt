@@ -952,6 +952,9 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
 
     Box(Modifier.fillMaxSize().padding(pad)) {
         // ── Full-screen map WebView ──────────────────────────────────────────
+        DisposableEffect(Unit) {
+            onDispose { vm.mapWebViewCenterCallback = null }
+        }
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
@@ -2346,8 +2349,8 @@ fun AgentBottomSheetRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
             .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
+            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -2366,7 +2369,7 @@ fun AgentBottomSheetRow(
                 buildString {
                     if (agent.online) {
                         agent.metric?.let { m ->
-                            append("CPU ${(m.load1 * 100).toInt()}%")
+                            append("Load ${"%.2f".format(m.load1)}")
                             if (m.mem_total != null && m.mem_total > 0L) {
                                 val usedMb = (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L
                                 append("  RAM ${usedMb}MB")
