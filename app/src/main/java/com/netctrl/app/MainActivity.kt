@@ -2403,8 +2403,11 @@ fun RouterCard(
     vm: MainViewModel,
     onDismiss: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState()
+    val scope = rememberCoroutineScope()
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = sheetState,
         containerColor = Color(0xFF0D0B1E),
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)
     ) {
@@ -2426,8 +2429,7 @@ fun RouterCard(
                         color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold
                     )
                     val local = ui.agentLocalMap[agent.agent_id]
-                    val nowSecs = System.currentTimeMillis() / 1000
-                    val secsAgo = agent.last_seen_secs?.let { nowSecs - it }
+                    val secsAgo = agent.last_seen_secs
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -2463,17 +2465,17 @@ fun RouterCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
-                    onClick = { onDismiss(); vm.openNativeSsh(agent) },
+                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openNativeSsh(agent) } },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
                     modifier = Modifier.weight(1f)
                 ) { Text("SSH", color = AccentVoid) }
                 Button(
-                    onClick = { onDismiss(); vm.openLuci(agent) },
+                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openLuci(agent) } },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
                     modifier = Modifier.weight(1f)
                 ) { Text("LuCI", color = TextPrimary) }
                 Button(
-                    onClick = { onDismiss(); vm.openAgentSettings(agent.agent_id) },
+                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openAgentSettings(agent.agent_id) } },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
                     modifier = Modifier.weight(1f)
                 ) { Text("Настройки", color = TextSecondary) }
