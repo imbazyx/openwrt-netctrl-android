@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -2681,8 +2683,102 @@ fun AgentSettingsScreen(
     }
 }
 
+// ─── NATIVE SSH SCREEN ────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun NativeSshScreen(agent: AgentFull, ui: UiState, vm: MainViewModel, onBack: () -> Unit) {
-    // placeholder — will be replaced in Task 12
-    androidx.compose.material3.Text("SSH — ${agent.display_name ?: agent.agent_id}")
+fun NativeSshScreen(
+    agent: AgentFull,
+    ui: UiState,
+    vm: MainViewModel,
+    onBack: () -> Unit
+) {
+    val output = ui.sshOutput
+    val connected = ui.sshConnected
+    val connecting = ui.sshConnecting
+    var inputText by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+
+    // Auto-scroll to bottom when output changes
+    val lines = remember(output) { output.split('\n') }
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("SSH — ${agent.display_name ?: agent.agent_id}", color = TextPrimary)
+                        Box(
+                            Modifier.size(8.dp)
+                                .background(if (connected) Color(0xFF00FF88) else Color(0xFFFF4444), RoundedCornerShape(50))
+                        )
+                    }
+                },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        Column(Modifier.fillMaxSize().padding(pad)) {
+            if (connecting) {
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentVoid, trackColor = CardBg)
+            }
+
+            // Terminal output area
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color(0xFF030209))
+                    .padding(8.dp)
+            ) {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                    items(lines.size) { i ->
+                        Text(
+                            lines[i],
+                            color = Color(0xFFCCCCCC),
+                            fontSize = 12.sp,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            softWrap = true
+                        )
+                    }
+                }
+            }
+
+            // Input row
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .background(CardBg)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                OutlinedTextField(
+                    value = inputText,
+                    onValueChange = { inputText = it },
+                    placeholder = { Text("Команда...", color = TextSecondary, fontSize = 13.sp) },
+                    modifier = Modifier.weight(1f),
+                    colors = customOutlinedColors(),
+                    singleLine = true,
+                    enabled = connected,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = {
+                        vm.sshSendLine(inputText)
+                        inputText = ""
+                    })
+                )
+                Spacer(Modifier.width(4.dp))
+                IconButton(
+                    onClick = { vm.sshSendLine(inputText); inputText = "" },
+                    enabled = connected
+                ) {
+                    Icon(Icons.Default.Send, "Отправить", tint = if (connected) AccentVoid else TextSecondary)
+                }
+            }
+        }
+    }
 }
