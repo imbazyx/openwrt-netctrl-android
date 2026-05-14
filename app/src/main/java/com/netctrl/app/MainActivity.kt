@@ -872,8 +872,8 @@ class MapBridge(private val vm: MainViewModel) {
                     a.lng?.let { put("lng", it) } ?: put("lng", org.json.JSONObject.NULL)
                     a.metric?.let { m ->
                         put("cpu_load", m.load1)
-                        val ramTotalMb = if ((m.mem_total ?: 0L) > 0L) (m.mem_total!! / 1024L / 1024L) else 0L
-                        val ramUsedMb = if ((m.mem_total ?: 0L) > 0L) ((m.mem_total!! - m.mem_free) / 1024L / 1024L) else 0L
+                        val ramTotalMb = if (m.mem_total != null && m.mem_total > 0) m.mem_total / 1024L / 1024L else 0L
+                        val ramUsedMb = if (m.mem_total != null && m.mem_total > 0) (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L else 0L
                         put("ram_usage", ramUsedMb)
                         put("ram_total", ramTotalMb)
                         put("wifi_clients", m.wifi_clients ?: org.json.JSONObject.NULL)
@@ -2367,8 +2367,8 @@ fun AgentBottomSheetRow(
                     if (agent.online) {
                         agent.metric?.let { m ->
                             append("CPU ${(m.load1 * 100).toInt()}%")
-                            if ((m.mem_total ?: 0L) > 0L) {
-                                val usedMb = (m.mem_total!! - m.mem_free) / 1024L / 1024L
+                            if (m.mem_total != null && m.mem_total > 0L) {
+                                val usedMb = (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L
                                 append("  RAM ${usedMb}MB")
                             }
                         }
