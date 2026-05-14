@@ -112,9 +112,10 @@ setTimeout(function() {
 }
 
 function makeIcon(online) {
-  const color = online ? '#3FB950' : '#F85149';
+  const color = online ? '#7050c8' : '#888888';
+  const opacity = online ? 1.0 : 0.5;
   return L.divIcon({
-    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.8);box-shadow:0 2px 8px rgba(0,0,0,0.5)"></div>`,
+    html: `<div style="width:16px;height:16px;border-radius:50%;background:${color};border:2px solid rgba(255,255,255,0.8);box-shadow:0 2px 8px rgba(0,0,0,0.5);opacity:${opacity}"></div>`,
     iconSize: [16, 16], iconAnchor: [8, 8], className: ''
   });
 }
@@ -131,12 +132,18 @@ function makePopupHtml(a) {
   
   // Метрики
   if (a.cpu_load != null) {
-    html += `<div class="popup-meta">CPU Load: ${a.cpu_load.toFixed(2)}</div>`;
+    const cpuPct = typeof a.cpu_load === 'number' ? (a.cpu_load * 100).toFixed(1) : a.cpu_load;
+    html += `<div class="popup-meta">CPU: ${cpuPct}%</div>`;
   }
-  if (a.mem_total && a.mem_total > 0 && a.mem_free != null) {
-    const usedMem = Math.round((a.mem_total - a.mem_free) / 1024);
-    const totalMem = Math.round(a.mem_total / 1024);
+  if (a.ram_total && a.ram_total > 0) {
+    html += `<div class="popup-meta">RAM: ${a.ram_usage || 0}/${a.ram_total} MB</div>`;
+  } else if (a.mem_total && a.mem_total > 0 && a.mem_free != null) {
+    const usedMem = Math.round((a.mem_total - a.mem_free) / 1024 / 1024);
+    const totalMem = Math.round(a.mem_total / 1024 / 1024);
     html += `<div class="popup-meta">RAM: ${usedMem}/${totalMem} MB</div>`;
+  }
+  if (a.wifi_clients != null) {
+    html += `<div class="popup-meta">WiFi клиенты: ${a.wifi_clients}</div>`;
   }
   if (a.temperature && a.temperature > 0) {
     html += `<div class="popup-meta">Temp: ${a.temperature.toFixed(1)}°C</div>`;
@@ -180,6 +187,16 @@ window.fitBounds = function() {
   if (!map) return;
   var ml = Object.values(markers);
   if (ml.length > 0) { try { map.fitBounds(L.featureGroup(ml).getBounds().pad(0.15)); } catch(e){} }
+};
+
+window.centerMap = function(lat, lon) {
+  if (!map) return;
+  map.flyTo([lat, lon], Math.max(map.getZoom(), 13), { animate: true, duration: 0.3 });
+  var m = Object.values(markers).find(function(mk) {
+    var ll = mk.getLatLng();
+    return Math.abs(ll.lat - lat) < 0.0001 && Math.abs(ll.lng - lon) < 0.0001;
+  });
+  if (m) m.openPopup();
 };
 
 window.refreshAgents = function() {

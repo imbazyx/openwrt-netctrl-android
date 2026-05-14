@@ -1,4 +1,4 @@
-package com.netctrl.app
+﻿package com.netctrl.app
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -870,9 +870,29 @@ class MapBridge(private val vm: MainViewModel) {
                     put("luci_url", a.luci_url ?: "http://${a.local_ip ?: ""}")
                     a.lat?.let { put("lat", it) } ?: put("lat", org.json.JSONObject.NULL)
                     a.lng?.let { put("lng", it) } ?: put("lng", org.json.JSONObject.NULL)
+                    a.metric?.let { m ->
+                        put("cpu_load", m.load1)
+                        val ramTotalMb = if ((m.mem_total ?: 0L) > 0L) (m.mem_total!! / 1024L / 1024L) else 0L
+                        val ramUsedMb = if ((m.mem_total ?: 0L) > 0L) ((m.mem_total!! - m.mem_free) / 1024L / 1024L) else 0L
+                        put("ram_usage", ramUsedMb)
+                        put("ram_total", ramTotalMb)
+                        put("wifi_clients", m.wifi_clients ?: org.json.JSONObject.NULL)
+                        put("temperature", m.temperature ?: org.json.JSONObject.NULL)
+                    } ?: run {
+                        put("cpu_load", org.json.JSONObject.NULL)
+                        put("ram_usage", org.json.JSONObject.NULL)
+                        put("ram_total", org.json.JSONObject.NULL)
+                        put("wifi_clients", org.json.JSONObject.NULL)
+                        put("temperature", org.json.JSONObject.NULL)
+                    }
                 }
             }).toString()
         } catch (_: Exception) { "[]" }
+    }
+
+    @android.webkit.JavascriptInterface
+    fun log(msg: String) {
+        android.util.Log.d("NetCtrl-MapJS", msg)
     }
 
     @android.webkit.JavascriptInterface
@@ -925,11 +945,12 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     BackHandler(enabled = pickMode && !sidebarOpen) { vm.cancelMapPick() }
 
     LaunchedEffect(agentsSnapshot) {
-        webViewRef?.evaluateJavascript("refreshAgents();", null)
+        // Немедленное обновление при изменении списка агентов
+        webViewRef?.evaluateJavascript("try { window.refreshAgents(); } catch(e) { console.log('err: ' + e.message); }", null)
     }
     LaunchedEffect(pickMode) {
-        if (pickMode) webViewRef?.evaluateJavascript("enterPickMode();", null)
-        else webViewRef?.evaluateJavascript("exitPickMode();", null)
+        if (pickMode) android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ webViewRef?.evaluateJavascript("try { enterPickMode(); } catch(e) { console.log('err: ' + e.message); }", null) }, 500)
+        else android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ webViewRef?.evaluateJavascript("try { exitPickMode(); } catch(e) { console.log('err: ' + e.message); }", null) }, 500)
     }
 
     Box(Modifier.fillMaxSize().padding(pad)) {
@@ -946,9 +967,14 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                     settings.javaScriptCanOpenWindowsAutomatically = false
                     addJavascriptInterface(MapBridge(vm), "AndroidBridge")
                     webViewClient = android.webkit.WebViewClient()
-                    webChromeClient = android.webkit.WebChromeClient()
+                     webChromeClient = object : android.webkit.WebChromeClient() {
+                         override fun onConsoleMessage(cm: android.webkit.ConsoleMessage): Boolean {
+                             android.util.Log.d("NetCtrl-Map", "${cm.message()} -- ")
+                             return true
+                         }
+                     }
                     webViewRef = this
-                    loadUrl("file:///android_asset/map.html")
+                     loadUrl("file:///android_asset/map.html")
                 }
             }
         )
