@@ -4,8 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -28,6 +28,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private var wsManager: H3363tWebSocketManager? = null
     private var wsCollectorJob: kotlinx.coroutines.Job? = null
     private val localNodeManager = LocalNodeManager()
+    val agentLocalPrefs = AgentLocalPrefs(app)
+    val credentialStore = CredentialStore(app)
+    private var sshSession: SshSessionManager? = null
+    var mapWebViewCenterCallback: ((Double, Double) -> Unit)? = null
 
     init {
         viewModelScope.launch {
@@ -43,7 +47,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         )
                     }
                     connectH3363tWs(url, token)
-                    loadAgents(url, token)
+                    fetchAgents(url, token)
                 }
             }
         }
@@ -79,7 +83,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     )
                 }
                 connectH3363tWs(url, resp.access_token)
-                loadAgents(url, resp.access_token)
+                fetchAgents(url, resp.access_token)
             } catch (e: Exception) {
                 _ui.update { it.copy(loading = false, error = e.message ?: "Ошибка подключения") }
             }
@@ -151,55 +155,58 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh() {
         val s = _ui.value
         if (s.serverUrl.isNotBlank() && s.token.isNotBlank())
-            loadAgents(s.serverUrl, s.token)
+            fetchAgents(s.serverUrl, s.token)
     }
 
-    private fun loadAgents(url: String, token: String) {
+    private fun fetchAgents(url: String, token: String) {
         viewModelScope.launch {
             try {
                 val api = buildApi(url)
                 val bearer = "Bearer $token"
 
-                // Health check
-                try {
-                    api.health()
-                    _ui.update { it.copy(serverHealthOk = true) }
-                } catch (_: Exception) {
-                    _ui.update { it.copy(serverHealthOk = false) }
-                }
+                try { api.health(); _ui.update { it.copy(serverHealthOk = true) } }
+                catch (_: Exception) { _ui.update { it.copy(serverHealthOk = false) } }
 
-                val agentsDeferred = async { api.agents(bearer).data ?: emptyList() }
-                val configsDeferred = async { api.configs(bearer).data ?: emptyList() }
-                val agents = agentsDeferred.await()
-                val configs = configsDeferred.await()
-                val configMap = configs.associateBy { it.agent_id }
+                val owmList = api.agents(bearer).data ?: emptyList()
+                val localMap = agentLocalPrefs.loadAll(owmList.map { it.agent_id })
 
-                val metricsMap = agents
-                    .filter { it.online }
-                    .map { agent ->
-                        async {
-                            agent.agent_id to try {
-                                api.metrics(agent.agent_id, bearer, 1).data?.firstOrNull()
-                            } catch (e: Exception) { null }
-                        }
-                    }.awaitAll().toMap()
-
-                val full = agents.map { a ->
-                    val cfg = configMap[a.agent_id]
+                val full = owmList.map { a ->
+                    val settings = localMap[a.agent_id] ?: AgentLocalSettings()
+                    val ramFreeBytes = ((a.ram_total ?: 0L) - (a.ram_usage ?: 0L)) * 1024L * 1024L
+                    val ramTotalBytes = (a.ram_total ?: 0L) * 1024L * 1024L
                     AgentFull(
                         agent_id = a.agent_id,
                         online = a.online,
                         last_seen_secs = a.last_seen_secs,
-                        display_name = cfg?.display_name,
-                        address = cfg?.address,
-                        local_ip = cfg?.local_ip,
-                        luci_url = cfg?.luci_url,
-                        lat = cfg?.lat,
-                        lng = cfg?.lng,
-                        metric = metricsMap[a.agent_id]
+                        display_name = a.agent_name,
+                        address = settings.physicalAddress.ifBlank { null },
+                        local_ip = settings.ip.ifBlank { null },
+                        luci_url = if (settings.ip.isNotBlank()) "http://${settings.ip}:${settings.luciPort}" else null,
+                        lat = settings.lat,
+                        lng = settings.lon,
+                        metric = if (a.online) Metric(
+                            timestamp = a.last_seen_secs ?: 0L,
+                            uptime = 0.0,
+                            load1 = a.cpu_load ?: 0.0,
+                            load5 = a.cpu_load ?: 0.0,
+                            load15 = a.cpu_load ?: 0.0,
+                            mem_free = ramFreeBytes,
+                            mem_total = ramTotalBytes,
+                            temperature = null,
+                            wifi_clients = a.wifi_clients,
+                            wan_rx = null,
+                            wan_tx = null
+                        ) else null
                     )
                 }
-                _ui.update { it.copy(agents = full, error = null) }
+                _ui.update {
+                    it.copy(
+                        owmAgents = owmList,
+                        agentLocalMap = localMap,
+                        agents = full,
+                        error = null
+                    )
+                }
             } catch (e: Exception) {
                 _ui.update { it.copy(error = e.message) }
             }
@@ -235,7 +242,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(serverUrl = newUrl) }
             if (s.token.isNotBlank()) {
                 connectH3363tWs(newUrl, s.token)
-                loadAgents(newUrl, s.token)
+                fetchAgents(newUrl, s.token)
             }
         }
     }
@@ -492,7 +499,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 buildApi(s.serverUrl).createAgent("Bearer ${s.token}", req)
-                loadAgents(s.serverUrl, s.token)
+                fetchAgents(s.serverUrl, s.token)
             } catch (_: Exception) {}
         }
     }
@@ -507,7 +514,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val resp = buildApi(s.serverUrl).deleteAgent("Bearer ${s.token}", agentId)
                 if (resp.success) {
-                    loadAgents(s.serverUrl, s.token)
+                    fetchAgents(s.serverUrl, s.token)
                     val cur = _ui.value.screen
                     if (cur is Screen.Detail && cur.agent.agent_id == agentId)
                         _ui.update { it.copy(screen = Screen.Dashboard, selectedAgent = null, agentDetail = null) }
@@ -532,7 +539,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     "Bearer ${s.token}",
                     CreateAgentRequest(agent_id = agentId, display_name = newName)
                 )
-                loadAgents(s.serverUrl, s.token)
+                fetchAgents(s.serverUrl, s.token)
             } catch (_: Exception) {}
         }
     }
@@ -545,7 +552,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     "Bearer ${s.token}",
                     CreateAgentRequest(agent_id = agentId, local_ip = newIp, ssh_host = newIp)
                 )
-                loadAgents(s.serverUrl, s.token)
+                fetchAgents(s.serverUrl, s.token)
             } catch (_: Exception) {}
         }
     }
@@ -570,6 +577,91 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(selectedMetricsAgentId = agentId) }
         loadMetrics(agentId, 1)
         navigateTo(Screen.Metrics)
+    }
+
+    // ─── Native SSH ───
+
+    fun openNativeSsh(agent: AgentFull) {
+        sshSession?.disconnect()
+        sshSession = SshSessionManager(viewModelScope).also { mgr ->
+            viewModelScope.launch {
+                mgr.output.collect { out -> _ui.update { it.copy(sshOutput = out) } }
+            }
+            viewModelScope.launch {
+                mgr.connected.collect { c -> _ui.update { it.copy(sshConnected = c, sshConnecting = false) } }
+            }
+        }
+        val s = _ui.value
+        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+        val host = localSettings.ip.ifBlank { agent.local_ip ?: "" }
+        val port = localSettings.sshPort
+        val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
+        val pass = credentialStore.getSshPass(agent.agent_id)
+        _ui.update { it.copy(sshOutput = "", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
+        sshSession!!.connect(host, port, login, pass)
+    }
+
+    fun sshSendLine(line: String) { sshSession?.sendLine(line) }
+
+    fun closeSsh() {
+        sshSession?.disconnect()
+        sshSession = null
+        _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
+    }
+
+    // ─── Local Settings CRUD ───
+
+    fun openAgentSettings(agentId: String) {
+        _ui.update { it.copy(agentSettingsId = agentId, screen = Screen.AgentSettings(agentId)) }
+    }
+
+    fun closeAgentSettings() {
+        _ui.update { it.copy(agentSettingsId = null, screen = Screen.Dashboard) }
+    }
+
+    fun saveAgentLocalSettings(agentId: String, settings: AgentLocalSettings) {
+        viewModelScope.launch {
+            agentLocalPrefs.save(agentId, settings)
+            val s = _ui.value
+            fetchAgents(s.serverUrl, s.token)
+        }
+    }
+
+    // ─── Router Card ───
+
+    fun openRouterCard(agent: AgentFull) {
+        _ui.update { it.copy(routerCardAgent = agent) }
+    }
+
+    fun closeRouterCard() {
+        _ui.update { it.copy(routerCardAgent = null) }
+    }
+
+    // ─── Nominatim Geocoding ───
+
+    fun geocodeAddress(address: String, onResult: (Double?, Double?) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val encoded = java.net.URLEncoder.encode(address, "UTF-8")
+                val url = java.net.URL("https://nominatim.openstreetmap.org/search?q=$encoded&format=json&limit=1")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.setRequestProperty("User-Agent", "NetCtrl-Android/2.0")
+                conn.connectTimeout = 10000
+                conn.readTimeout = 10000
+                val body = conn.inputStream.bufferedReader().readText()
+                val arr = org.json.JSONArray(body)
+                if (arr.length() > 0) {
+                    val obj = arr.getJSONObject(0)
+                    val lat = obj.getString("lat").toDoubleOrNull()
+                    val lon = obj.getString("lon").toDoubleOrNull()
+                    withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(lat, lon) }
+                } else {
+                    withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null, null) }
+                }
+            } catch (_: Exception) {
+                withContext(kotlinx.coroutines.Dispatchers.Main) { onResult(null, null) }
+            }
+        }
     }
 
     override fun onCleared() {
