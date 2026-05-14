@@ -2701,7 +2701,7 @@ fun NativeSshScreen(
 
     // Auto-scroll to bottom when output changes
     val lines = remember(output) { output.split('\n') }
-    LaunchedEffect(lines.size) {
+    LaunchedEffect(output) {
         if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
     }
 
