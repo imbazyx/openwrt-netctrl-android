@@ -84,6 +84,7 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
             )
             is Screen.LuciView -> LuciViewScreen(
                 agent = screen.agent,
+                credentialStore = vm.credentialStore,
                 onBack = { vm.navigateTo(Screen.Dashboard) }
             )
             is Screen.H3363TNode -> H3363TScreen(
@@ -1142,13 +1143,16 @@ fun SshTerminalScreen(agent: AgentFull, serverUrl: String, token: String, onBack
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun LuciViewScreen(agent: AgentFull, onBack: () -> Unit) {
+fun LuciViewScreen(agent: AgentFull, credentialStore: CredentialStore, onBack: () -> Unit) {
     val luciUrl = agent.luci_url ?: "http://${agent.local_ip ?: "192.168.1.1"}"
+    val luciLogin = credentialStore.getLuciLogin(agent.agent_id).ifBlank { "root" }
+    val luciPass = credentialStore.getLuciPass(agent.agent_id)
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("LuCI — ${agent.display_name ?: agent.agent_id}", color = TextPrimary) },
-                navigationIcon = { IconButton(onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
             )
         },
@@ -1163,8 +1167,28 @@ fun LuciViewScreen(agent: AgentFull, onBack: () -> Unit) {
                     settings.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
                     settings.loadWithOverviewMode = true
                     settings.useWideViewPort = true
-                    webViewClient = android.webkit.WebViewClient()
                     webChromeClient = android.webkit.WebChromeClient()
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                            super.onPageFinished(view, url)
+                            if (luciPass.isNotBlank()) {
+                                val escapedLogin = luciLogin.replace("\\", "\\\\").replace("'", "\\'")
+                                val escapedPass = luciPass.replace("\\", "\\\\").replace("'", "\\'")
+                                val js = """
+                                    (function() {
+                                        var pwField = document.querySelector('input[type=password]');
+                                        if (!pwField) return;
+                                        var userField = document.querySelector('input[name=luci_username], input[type=text]');
+                                        if (userField) userField.value = '$escapedLogin';
+                                        pwField.value = '$escapedPass';
+                                        var form = pwField.closest('form');
+                                        if (form) form.submit();
+                                    })();
+                                """.trimIndent()
+                                view?.evaluateJavascript(js, null)
+                            }
+                        }
+                    }
                     loadUrl(luciUrl)
                 }
             }
