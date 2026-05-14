@@ -939,10 +939,7 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
     val agentsSnapshot = ui.agents
     val pickMode = ui.mapPickMode
-    var sidebarOpen by remember { mutableStateOf(false) }
-
-    BackHandler(enabled = sidebarOpen) { sidebarOpen = false }
-    BackHandler(enabled = pickMode && !sidebarOpen) { vm.cancelMapPick() }
+    BackHandler(enabled = pickMode) { vm.cancelMapPick() }
 
     LaunchedEffect(agentsSnapshot) {
         // Немедленное обновление при изменении списка агентов
@@ -974,108 +971,23 @@ fun MapTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                          }
                      }
                     webViewRef = this
+                    vm.mapWebViewCenterCallback = { lat, lon ->
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            evaluateJavascript("try { window.centerMap($lat, $lon); } catch(e) {}", null)
+                        }
+                    }
                      loadUrl("file:///android_asset/map.html")
                 }
             }
         )
 
-        // ── Sidebar overlay ──────────────────────────────────────────────────
-        AnimatedVisibility(
-            visible = sidebarOpen,
-            enter = slideInHorizontally { -it },
-            exit = slideOutHorizontally { -it }
-        ) {
-            Column(
-                Modifier
-                    .width(200.dp)
-                    .fillMaxHeight()
-                    .background(CardBg.copy(alpha = 0.96f))
-            ) {
-                Row(
-                    Modifier.fillMaxWidth().padding(8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text("РОУТЕРЫ", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    IconButton(
-                        onClick = { sidebarOpen = false },
-                        modifier = Modifier.size(30.dp)
-                    ) {
-                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
-                    }
-                }
-                HorizontalDivider(color = DividerColor)
-
-                if (pickMode) {
-                    Column(
-                        Modifier.padding(10.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("📍 Кликни на карту", color = AccentVoid, fontSize = 13.sp)
-                        OutlinedButton(
-                            onClick = { vm.cancelMapPick(); sidebarOpen = false },
-                            modifier = Modifier.fillMaxWidth().height(32.dp),
-                            contentPadding = PaddingValues(0.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary)
-                        ) { Text("Отмена", fontSize = 12.sp) }
-                    }
-                } else {
-                    LazyColumn(contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)) {
-                        items(ui.agents) { agent ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .clickable { vm.openDetail(agent); sidebarOpen = false }
-                                    .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
-                                    .padding(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                Box(
-                                    Modifier
-                                        .size(8.dp)
-                                        .background(
-                                            if (agent.online) OnlineGreen else OfflineRed,
-                                            RoundedCornerShape(50)
-                                        )
-                                )
-                                Column(Modifier.weight(1f)) {
-                                    Text(
-                                        agent.display_name ?: agent.agent_id,
-                                        color = TextPrimary, fontSize = 12.sp,
-                                        fontWeight = FontWeight.Medium
-                                    )
-                                    agent.address?.let {
-                                        Text(it, color = TextSecondary, fontSize = 10.sp)
-                                    }
-                                }
-                            }
-                            Spacer(Modifier.height(4.dp))
-                        }
-                    }
-                }
-            }
-        }
-
-        // ── Sidebar toggle button (top-left) ─────────────────────────────────
-        if (!sidebarOpen) {
-            Surface(
-                onClick = { sidebarOpen = true },
-                modifier = Modifier.align(Alignment.TopStart).padding(10.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = CardBg.copy(alpha = 0.9f),
-                shadowElevation = 4.dp
-            ) {
-                Row(
-                    Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Icon(Icons.Default.Menu, null, tint = TextPrimary, modifier = Modifier.size(16.dp))
-                    Text("Роутеры", color = TextPrimary, fontSize = 12.sp)
-                }
-            }
-        }
+        // ── Bottom sheet overlay ─────────────────────────────────────────────
+        MapBottomSheet(
+            ui = ui,
+            vm = vm,
+            onCenterMap = { lat, lon -> vm.mapWebViewCenterCallback?.invoke(lat, lon) },
+            onOpenCard = { agent -> vm.openRouterCard(agent) }
+        )
 
         // ── Pick mode top banner ─────────────────────────────────────────────
         if (pickMode) {
@@ -2356,3 +2268,120 @@ fun formatEventTime(timestamp: Long): String {
 
 fun String.capitalize(): String =
     if (isNotEmpty()) replaceFirstChar { it.uppercase() } else this
+
+// ─── MAP BOTTOM SHEET ────────────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MapBottomSheet(
+    ui: UiState,
+    vm: MainViewModel,
+    onCenterMap: (Double, Double) -> Unit,
+    onOpenCard: (AgentFull) -> Unit
+) {
+    val sheetState = rememberStandardBottomSheetState(
+        initialValue = SheetValue.PartiallyExpanded,
+        skipHiddenState = true
+    )
+    val scaffoldState = rememberBottomSheetScaffoldState(bottomSheetState = sheetState)
+
+    BottomSheetScaffold(
+        scaffoldState = scaffoldState,
+        sheetPeekHeight = 64.dp,
+        sheetContainerColor = Color(0xFF0D0B1E),
+        sheetShape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        containerColor = Color.Transparent,
+        sheetContent = {
+            Column {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "РОУТЕРЫ (${ui.agents.size})",
+                        color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                    )
+                    OutlinedButton(
+                        onClick = { vm.refresh() },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentVoid),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, AccentVoid.copy(alpha = 0.5f))
+                    ) { Text("Обновить", fontSize = 11.sp) }
+                }
+                HorizontalDivider(color = Color(0xFF2A2250))
+                LazyColumn(
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier.heightIn(max = 300.dp)
+                ) {
+                    items(ui.agents) { agent ->
+                        AgentBottomSheetRow(
+                            agent = agent,
+                            localSettings = ui.agentLocalMap[agent.agent_id],
+                            onTap = {
+                                val local = ui.agentLocalMap[agent.agent_id]
+                                if (local?.lat != null && local.lon != null) {
+                                    onCenterMap(local.lat, local.lon)
+                                }
+                            },
+                            onLongPress = { onOpenCard(agent) }
+                        )
+                    }
+                }
+            }
+        }
+    ) { }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun AgentBottomSheetRow(
+    agent: AgentFull,
+    localSettings: AgentLocalSettings?,
+    onTap: () -> Unit,
+    onLongPress: () -> Unit
+) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .combinedClickable(onClick = onTap, onLongClick = onLongPress)
+            .background(Color(0xFF16133A), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Box(
+            Modifier
+                .size(8.dp)
+                .background(if (agent.online) AccentVoid else Color(0xFF888888), RoundedCornerShape(50))
+        )
+        Column(Modifier.weight(1f)) {
+            Text(
+                agent.display_name ?: agent.agent_id,
+                color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium
+            )
+            Text(
+                buildString {
+                    if (agent.online) {
+                        agent.metric?.let { m ->
+                            append("CPU ${(m.load1 * 100).toInt()}%")
+                            if ((m.mem_total ?: 0L) > 0L) {
+                                val usedMb = (m.mem_total!! - m.mem_free) / 1024L / 1024L
+                                append("  RAM ${usedMb}MB")
+                            }
+                        }
+                    } else {
+                        append("Офлайн")
+                    }
+                },
+                color = TextSecondary, fontSize = 11.sp
+            )
+        }
+        Box(
+            Modifier.size(6.dp)
+                .background(if (agent.online) OnlineGreen else OfflineRed, RoundedCornerShape(50))
+        )
+    }
+}
