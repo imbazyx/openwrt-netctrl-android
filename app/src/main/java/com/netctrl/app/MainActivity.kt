@@ -107,6 +107,18 @@ fun NetCtrlApp(vm: MainViewModel = viewModel()) {
             )
             is Screen.Web -> MainWebScreen(serverUrl = screen.url, token = ui.token, username = ui.username, onLogout = { vm.logout() })
             is Screen.Metrics -> MetricsFullScreen(ui = ui, vm = vm, onBack = { vm.navigateTo(Screen.Dashboard) })
+            is Screen.AgentSettings -> AgentSettingsScreen(
+                agentId = screen.agentId,
+                ui = ui,
+                vm = vm,
+                onBack = { vm.closeAgentSettings() }
+            )
+            is Screen.NativeSsh -> NativeSshScreen(
+                agent = screen.agent,
+                ui = ui,
+                vm = vm,
+                onBack = { vm.closeSsh() }
+            )
             else -> MainTabScaffold(ui = ui, vm = vm)
         }
         // Router card overlay (shown above any screen)
@@ -2498,4 +2510,179 @@ fun RouterCard(
             }
         }
     }
+}
+
+// ─── AGENT SETTINGS SCREEN ───────────────────────────────────────────────────
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun AgentSettingsScreen(
+    agentId: String,
+    ui: UiState,
+    vm: MainViewModel,
+    onBack: () -> Unit
+) {
+    val agent = ui.agents.find { it.agent_id == agentId }
+    val initLocal = ui.agentLocalMap[agentId] ?: AgentLocalSettings()
+
+    var ip by remember(agentId) { mutableStateOf(initLocal.ip) }
+    var sshPort by remember(agentId) { mutableStateOf(initLocal.sshPort.toString()) }
+    var luciPort by remember(agentId) { mutableStateOf(initLocal.luciPort.toString()) }
+    var address by remember(agentId) { mutableStateOf(initLocal.physicalAddress) }
+    var lat by remember(agentId) { mutableStateOf(initLocal.lat?.toString() ?: "") }
+    var lon by remember(agentId) { mutableStateOf(initLocal.lon?.toString() ?: "") }
+    var sshLogin by remember(agentId) { mutableStateOf(vm.credentialStore.getSshLogin(agentId)) }
+    var sshPass by remember(agentId) { mutableStateOf(vm.credentialStore.getSshPass(agentId)) }
+    var luciLogin by remember(agentId) { mutableStateOf(vm.credentialStore.getLuciLogin(agentId)) }
+    var luciPass by remember(agentId) { mutableStateOf(vm.credentialStore.getLuciPass(agentId)) }
+    var geocoding by remember { mutableStateOf(false) }
+    var geocodeError by remember { mutableStateOf("") }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Настройки — ${agent?.display_name ?: agentId}", color = TextPrimary) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
+                actions = {
+                    TextButton(onClick = {
+                        vm.credentialStore.saveSsh(agentId, sshLogin, sshPass)
+                        vm.credentialStore.saveLuci(agentId, luciLogin, luciPass)
+                        vm.saveAgentLocalSettings(agentId, AgentLocalSettings(
+                            ip = ip,
+                            sshPort = sshPort.toIntOrNull() ?: 22,
+                            luciPort = luciPort.toIntOrNull() ?: 80,
+                            physicalAddress = address,
+                            lat = lat.toDoubleOrNull(),
+                            lon = lon.toDoubleOrNull()
+                        ))
+                        onBack()
+                    }) { Text("Сохранить", color = AccentVoid) }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = CardBg)
+            )
+        },
+        containerColor = BgDark
+    ) { pad ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(pad),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            item {
+                Text("Сеть", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = ip, onValueChange = { ip = it },
+                    label = { Text("IP адрес") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = sshPort, onValueChange = { sshPort = it },
+                        label = { Text("SSH порт") },
+                        modifier = Modifier.weight(1f),
+                        colors = customOutlinedColors()
+                    )
+                    OutlinedTextField(
+                        value = luciPort, onValueChange = { luciPort = it },
+                        label = { Text("LuCI порт") },
+                        modifier = Modifier.weight(1f),
+                        colors = customOutlinedColors()
+                    )
+                }
+            }
+            item {
+                Text("SSH", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = sshLogin, onValueChange = { sshLogin = it },
+                    label = { Text("Логин SSH") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = sshPass, onValueChange = { sshPass = it },
+                    label = { Text("Пароль SSH") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+            }
+            item {
+                Text("LuCI", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = luciLogin, onValueChange = { luciLogin = it },
+                    label = { Text("Логин LuCI") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = luciPass, onValueChange = { luciPass = it },
+                    label = { Text("Пароль LuCI") },
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+            }
+            item {
+                Text("Местоположение", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = address, onValueChange = { address = it },
+                    label = { Text("Физический адрес") },
+                    modifier = Modifier.fillMaxWidth(),
+                    trailingIcon = {
+                        if (geocoding) {
+                            CircularProgressIndicator(Modifier.size(20.dp), color = AccentVoid)
+                        } else {
+                            IconButton(onClick = {
+                                if (address.isBlank()) return@IconButton
+                                geocoding = true; geocodeError = ""
+                                vm.geocodeAddress(address) { la, lo ->
+                                    geocoding = false
+                                    if (la != null && lo != null) {
+                                        lat = la.toString(); lon = lo.toString()
+                                    } else {
+                                        geocodeError = "Адрес не найден"
+                                    }
+                                }
+                            }) {
+                                Icon(Icons.Default.Search, "Геокодировать", tint = AccentVoid)
+                            }
+                        }
+                    },
+                    colors = customOutlinedColors()
+                )
+                if (geocodeError.isNotBlank()) {
+                    Text(geocodeError, color = Color(0xFFFF4444), fontSize = 11.sp)
+                }
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = lat, onValueChange = { lat = it },
+                        label = { Text("Широта") },
+                        modifier = Modifier.weight(1f),
+                        colors = customOutlinedColors()
+                    )
+                    OutlinedTextField(
+                        value = lon, onValueChange = { lon = it },
+                        label = { Text("Долгота") },
+                        modifier = Modifier.weight(1f),
+                        colors = customOutlinedColors()
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NativeSshScreen(agent: AgentFull, ui: UiState, vm: MainViewModel, onBack: () -> Unit) {
+    // placeholder — will be replaced in Task 12
+    androidx.compose.material3.Text("SSH — ${agent.display_name ?: agent.agent_id}")
 }
