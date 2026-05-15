@@ -18,6 +18,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -203,10 +205,8 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
 fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var contextMenuAgent by remember { mutableStateOf<AgentFull?>(null) }
     var renameAgent by remember { mutableStateOf<AgentFull?>(null) }
-    var changeIpAgent by remember { mutableStateOf<AgentFull?>(null) }
     var reinstallAgent by remember { mutableStateOf<AgentFull?>(null) }
     var renameField by remember { mutableStateOf("") }
-    var ipField by remember { mutableStateOf("") }
     val clipboardManager = LocalClipboardManager.current
 
     val filtered = remember(ui.agents, ui.searchQuery) {
@@ -300,15 +300,6 @@ fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                                 leadingIcon = { Icon(Icons.Outlined.Edit, null, tint = AccentVoid) }
                             )
                             DropdownMenuItem(
-                                text = { Text("Изменить IP", color = TextPrimary) },
-                                onClick = {
-                                    ipField = agent.local_ip ?: ""
-                                    changeIpAgent = agent
-                                    contextMenuAgent = null
-                                },
-                                leadingIcon = { Icon(Icons.Outlined.Wifi, null, tint = AccentVoid) }
-                            )
-                            DropdownMenuItem(
                                 text = { Text("Переустановить агент", color = TextPrimary) },
                                 onClick = {
                                     reinstallAgent = agent
@@ -352,30 +343,6 @@ fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                 ) { Text("Сохранить") }
             },
             dismissButton = { TextButton({ renameAgent = null }) { Text("Отмена", color = TextSecondary) } },
-            containerColor = CardBg
-        )
-    }
-
-    // Change IP dialog
-    if (changeIpAgent != null) {
-        AlertDialog(
-            onDismissRequest = { changeIpAgent = null },
-            title = { Text("Изменить IP", color = TextPrimary) },
-            text = {
-                OutlinedTextField(
-                    value = ipField, onValueChange = { ipField = it },
-                    label = { Text("LAN IP роутера") }, colors = customOutlinedColors(), singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = { vm.updateAgentIp(changeIpAgent!!.agent_id, ipField); changeIpAgent = null },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentVoid),
-                    enabled = ipField.isNotBlank()
-                ) { Text("Сохранить") }
-            },
-            dismissButton = { TextButton({ changeIpAgent = null }) { Text("Отмена", color = TextSecondary) } },
             containerColor = CardBg
         )
     }
@@ -666,7 +633,7 @@ fun AgentCard(
             if (a.online && a.metric != null) {
                 val m = a.metric
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    MetricRow("Load", "%.2f".format(m.load1))
+                    MetricRow("CPU Load", "%.2f".format(m.load1))
                     MetricRow("Mem", memPercent(m.mem_free, m.mem_total))
                     MetricRow("Uptime", formatUptime(m.uptime))
                     m.temperature?.let { MetricRow("Темп.", "%.1f°C".format(it)) }
@@ -2031,6 +1998,7 @@ fun DetailScreen(
                                 val pct = m.ram_usage * 100 / m.ram_total
                                 InfoRow("RAM", "${m.ram_usage}/${m.ram_total} MB ($pct%)")
                             }
+                            m.temperature?.let { InfoRow("Температура", "%.1f°C".format(it)) }
                             m.wifi_clients?.let { InfoRow("WiFi клиенты", it.toString()) }
                             if (m.wan_rx_bytes != null || m.wan_tx_bytes != null)
                                 InfoRow("WAN", "↓${formatBytes(m.wan_rx_bytes)}  ↑${formatBytes(m.wan_tx_bytes)}")
@@ -2038,8 +2006,8 @@ fun DetailScreen(
                             m.node_peer_count?.let { InfoRow("Пиры", it.toString()) }
                         } ?: agent.metric?.let { m ->
                             InfoRow("Uptime", formatUptime(m.uptime))
-                            InfoRow("Load", "%.2f".format(m.load1))
-                            InfoRow("RAM %", memPercent(m.mem_free, m.mem_total))
+                            InfoRow("CPU Load", "%.2f".format(m.load1))
+                            InfoRow("RAM", memPercent(m.mem_free, m.mem_total))
                             m.temperature?.let { InfoRow("Температура", "%.1f°C".format(it)) }
                             m.wifi_clients?.let { InfoRow("WiFi клиенты", it.toString()) }
                             if (m.wan_rx != null || m.wan_tx != null)
@@ -2448,6 +2416,7 @@ fun RouterCard(
 ) {
     val sheetState = rememberModalBottomSheetState()
     val scope = rememberCoroutineScope()
+    var showActions by remember { mutableStateOf(false) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -2496,48 +2465,59 @@ fun RouterCard(
                         Text("WiFi клиенты: $wifiClients", color = TextSecondary, fontSize = 12.sp)
                     }
                 }
+                IconButton(onClick = { showActions = !showActions }) {
+                    Icon(
+                        if (showActions) Icons.Default.Close else Icons.Outlined.MoreVert,
+                        null,
+                        tint = TextSecondary
+                    )
+                }
             }
 
             Spacer(Modifier.height(16.dp))
             HorizontalDivider(color = Color(0xFF2A2250))
-            Spacer(Modifier.height(16.dp))
+            AnimatedVisibility(visible = showActions) {
+                Column {
+                    Spacer(Modifier.height(16.dp))
 
-            // Action buttons
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openNativeSsh(agent) } },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
-                    modifier = Modifier.weight(1f)
-                ) { Text("SSH", color = AccentVoid) }
-                Button(
-                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openLuci(agent) } },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
-                    modifier = Modifier.weight(1f)
-                ) { Text("LuCI", color = TextPrimary) }
-                Button(
-                    onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openAgentSettings(agent.agent_id) } },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
-                    modifier = Modifier.weight(1f)
-                ) { Text("Настройки", color = TextSecondary) }
-            }
+                    // Action buttons
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openNativeSsh(agent) } },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("SSH", color = AccentVoid) }
+                        Button(
+                            onClick = { scope.launch { sheetState.hide(); onDismiss(); vm.openLuci(agent) } },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("LuCI", color = TextPrimary) }
+                        Button(
+                            onClick = { showActions = false },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16133A)),
+                            modifier = Modifier.weight(1f)
+                        ) { Text("Карточка", color = TextSecondary) }
+                    }
 
-            Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(16.dp))
 
-            // Metrics
-            agent.metric?.let { m ->
-                Text("Метрики", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(8.dp))
-                MetricRow("Load", "%.2f".format(m.load1))
-                if (m.mem_total != null && m.mem_total > 0) {
-                    val usedMb = (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L
-                    val totalMb = m.mem_total / 1024L / 1024L
-                    MetricRow("RAM", "$usedMb / $totalMb MB")
+                    // Metrics
+                    agent.metric?.let { m ->
+                        Text("Метрики", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        MetricRow("CPU Load", "%.2f".format(m.load1))
+                        if (m.mem_total != null && m.mem_total > 0) {
+                            val usedMb = (m.mem_total - (m.mem_free ?: 0L)) / 1024L / 1024L
+                            val totalMb = m.mem_total / 1024L / 1024L
+                            MetricRow("RAM", "$usedMb / $totalMb MB")
+                        }
+                        m.wifi_clients?.let { MetricRow("WiFi клиенты", "$it") }
+                        m.temperature?.let { MetricRow("Температура", "${it.toInt()}°C") }
+                    }
                 }
-                m.wifi_clients?.let { MetricRow("WiFi клиенты", "$it") }
-                m.temperature?.let { MetricRow("Температура", "${it.toInt()}°C") }
             }
         }
     }
@@ -2725,13 +2705,12 @@ fun NativeSshScreen(
     val output = ui.sshOutput
     val connected = ui.sshConnected
     val connecting = ui.sshConnecting
-    var inputText by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scrollState = rememberScrollState()
 
-    // Auto-scroll to bottom when output changes
-    val lines = remember(output) { output.split('\n') }
+    // Автоскролл вниз при обновлении вывода
     LaunchedEffect(output) {
-        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+        scrollState.animateScrollTo(scrollState.maxValue)
     }
 
     Scaffold(
@@ -2742,7 +2721,7 @@ fun NativeSshScreen(
                         Text("SSH — ${agent.display_name ?: agent.agent_id}", color = TextPrimary)
                         Box(
                             Modifier.size(8.dp)
-                                .background(if (connected) Color(0xFF00FF88) else Color(0xFFFF4444), RoundedCornerShape(50))
+                                .background(if (connected) OnlineGreen else OfflineRed, RoundedCornerShape(50))
                         )
                     }
                 },
@@ -2757,57 +2736,110 @@ fun NativeSshScreen(
                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentVoid, trackColor = CardBg)
             }
 
-            // Terminal output area
+            // Terminal Output Area (как в Termux: вывод сверху, скроллится)
             Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .background(Color(0xFF030209))
-                    .padding(8.dp)
+                    .background(Color.Black)
             ) {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                    items(lines.size) { i ->
+                val showError = !connected && !connecting &&
+                    (output.contains("Connection failed") || output.contains("Ошибка"))
+                
+                if (showError) {
+                    Column(
+                        Modifier.fillMaxSize().padding(16.dp),
+                        verticalArrangement = Arrangement.Center,
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(Icons.Outlined.Error, null, tint = OfflineRed, modifier = Modifier.size(48.dp))
+                        Spacer(Modifier.height(12.dp))
+                        Text("SSH подключение не удалось", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                        Spacer(Modifier.height(8.dp))
+                        Text("Проверьте логин/пароль в настройках роутера", color = TextSecondary, fontSize = 13.sp)
+                        Spacer(Modifier.height(16.dp))
+                        TextButton(onClick = { vm.openAgentSettings(agent.agent_id) }) {
+                            Text("Открыть настройки", color = AccentVoid)
+                        }
+                    }
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(scrollState)
+                            .padding(8.dp)
+                    ) {
                         Text(
-                            lines[i],
-                            color = Color(0xFFCCCCCC),
-                            fontSize = 12.sp,
+                            text = AnsiParser.parse(output),
+                            fontSize = 14.sp,
+                            lineHeight = 16.sp,
                             fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            softWrap = true
+                            modifier = Modifier.fillMaxWidth()
                         )
                     }
                 }
             }
 
-            // Input row
-            Row(
-                Modifier
-                    .fillMaxWidth()
-                    .background(CardBg)
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                OutlinedTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it },
-                    placeholder = { Text("Команда...", color = TextSecondary, fontSize = 13.sp) },
-                    modifier = Modifier.weight(1f),
-                    colors = customOutlinedColors(),
-                    singleLine = true,
-                    enabled = connected,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = {
-                        vm.sshSendLine(inputText)
-                        inputText = ""
-                    })
-                )
-                Spacer(Modifier.width(4.dp))
-                IconButton(
-                    onClick = { vm.sshSendLine(inputText); inputText = "" },
-                    enabled = connected
-                ) {
-                    Icon(Icons.Default.Send, "Отправить", tint = if (connected) AccentVoid else TextSecondary)
+            // Terminal Input Field (как в Termux: ввод всегда снизу)
+            val editText = remember {
+                android.widget.EditText(context).apply {
+                    isFocusable = true
+                    isFocusableInTouchMode = true
+                    isSingleLine = true
+                    isCursorVisible = true
+                    setTextIsSelectable(false)
+                    hint = "Введите команду..."
+                    setHintTextColor(android.graphics.Color.parseColor("#666666"))
+
+                    // Моноширинный шрифт
+                    typeface = android.graphics.Typeface.MONOSPACE
+                    setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14f)
+                    setTextColor(android.graphics.Color.parseColor("#E0E0E0"))
+                    setBackgroundColor(android.graphics.Color.parseColor("#000000"))
+                    setPadding(16, 12, 16, 12)
+
+                    inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or
+                                android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
+                    imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+
+                    setOnEditorActionListener { _, actionId, _ ->
+                        if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEND) {
+                            if (!connected) return@setOnEditorActionListener false
+                            val text = text.toString()
+                            if (text.isNotEmpty()) {
+                                vm.sshSend(text + "\n")
+                                setText("")
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    }
+
+                    setOnClickListener { requestFocus() }
+                    setOnFocusChangeListener { _, hasFocus ->
+                        if (hasFocus) {
+                            post {
+                                val imm = context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager
+                                imm.showSoftInput(this, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+                            }
+                        }
+                    }
                 }
             }
+
+            AndroidView(
+                factory = { editText },
+                update = { 
+                    it.isEnabled = connected
+                    it.requestFocus() 
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .background(Color.Black)
+            )
         }
     }
 }
