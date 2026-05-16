@@ -1,13 +1,20 @@
 package com.netctrl.app
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -26,6 +33,8 @@ class H3363tWebSocketManager {
     private val _connectionState = MutableSharedFlow<Boolean>(replay = 1)
     val connectionState: SharedFlow<Boolean> = _connectionState.asSharedFlow()
 
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var reconnectJob: Job? = null
     private var reconnectAttempts = 0
     private val maxReconnectAttempts = 10
     private val baseReconnectDelayMs = 2000L
@@ -70,12 +79,14 @@ class H3363tWebSocketManager {
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             _connectionState.tryEmit(false)
-            scheduleReconnect()
+            android.util.Log.d("H3363T-WS", "WebSocket closed, scheduling reconnect")
+            scheduleReconnect(5000L)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             _connectionState.tryEmit(false)
-            scheduleReconnect()
+            android.util.Log.d("H3363T-WS", "WebSocket failure, scheduling reconnect")
+            scheduleReconnect(5000L)
         }
     }
 
@@ -102,21 +113,23 @@ class H3363tWebSocketManager {
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
+        scope.cancel()
         webSocket?.close(1000, "Client disconnecting")
         webSocket = null
         reconnectAttempts = 0
     }
 
-    private fun scheduleReconnect() {
+    private fun scheduleReconnect(delayMs: Long) {
         if (reconnectAttempts >= maxReconnectAttempts) return
 
-        reconnectAttempts++
-        val delay = baseReconnectDelayMs * (1L shl (reconnectAttempts - 1))
-
-        Thread {
-            Thread.sleep(delay)
-            // Reconnect will be triggered by the caller when they detect disconnection
-        }.start()
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            android.util.Log.d("H3363T-WS", "Attempting reconnect after ${delayMs}ms")
+            reconnectAttempts++
+            // connect() should be called by the owner of this manager to re-establish
+        }
     }
 
     private fun parseEvent(json: JSONObject): H3363tEvent {

@@ -1,5 +1,6 @@
 package com.netctrl.app
 
+import com.google.gson.annotations.SerializedName
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
@@ -37,18 +38,32 @@ data class RouterConfig(
     val address: String?
 )
 
+data class MetricPoint(
+    @SerializedName("load1") val load1: Double?,
+    @SerializedName("load5") val load5: Double?,
+    @SerializedName("load15") val load15: Double?,
+    @SerializedName("mem_free") val memFree: Long?,
+    @SerializedName("mem_total") val memTotal: Long?,
+    @SerializedName("temperature") val temperature: Double?,
+    @SerializedName("wifi_clients") val wifiClients: Int?,
+    @SerializedName("wan_rx") val wanRx: Long?,
+    @SerializedName("wan_tx") val wanTx: Long?,
+    @SerializedName("uptime") val uptime: Double?,
+    @SerializedName("timestamp") val timestamp: Long?
+)
+
 data class Metric(
     val timestamp: Long,
     val uptime: Double,
-    val load1: Double,
-    val load5: Double,
-    val load15: Double,
+    @SerializedName(value = "load1", alternate = ["cpu_load"]) val load1: Double,
+    @SerializedName(value = "load5", alternate = ["load_5"]) val load5: Double,
+    @SerializedName(value = "load15", alternate = ["load_15"]) val load15: Double,
     val mem_free: Long,
     val mem_total: Long?,
     val temperature: Float?,
     val wifi_clients: Int?,
-    val wan_rx: Long?,
-    val wan_tx: Long?
+    @SerializedName(value = "wan_rx", alternate = ["wan_rx_bytes"]) val wan_rx: Long?,
+    @SerializedName(value = "wan_tx", alternate = ["wan_tx_bytes"]) val wan_tx: Long?
 )
 
 // Объединённая модель для UI
@@ -59,6 +74,7 @@ data class AgentFull(
     val display_name: String?,
     val address: String?,
     val local_ip: String?,
+    val internal_ip: String? = null, // P2P IP для будущей интеграции с H3363T-нодой
     val luci_url: String?,
     val lat: Double?,
     val lng: Double?,
@@ -134,21 +150,23 @@ data class CreateAgentRequest(
 
 data class AgentDetailMetrics(
     val timestamp: Long?,
-    val cpu_load: Double?,
-    val ram_usage: Long?,
-    val ram_total: Long?,
+    @SerializedName("cpu_load") val cpu_load: Double?,
+    @SerializedName("ram_usage") val ram_usage: Long?,
+    @SerializedName("ram_total") val ram_total: Long?,
     val uptime: Long?,
-    val wifi_clients: Int?,
-    val wan_rx_bytes: Long?,
-    val wan_tx_bytes: Long?,
-    val node_peer_count: Int?,
-    val node_status: String?
+    @SerializedName("wifi_clients") val wifi_clients: Int?,
+    @SerializedName("wan_rx_bytes") val wan_rx_bytes: Long?,
+    @SerializedName("wan_tx_bytes") val wan_tx_bytes: Long?,
+    @SerializedName("node_peer_count") val node_peer_count: Int?,
+    @SerializedName("node_status") val node_status: String?,
+    @SerializedName("temperature") val temperature: Double? = null
 )
 
 data class AgentDetailData(
     val agent_id: String,
     val display_name: String?,
     val local_ip: String?,
+    val internal_ip: String? = null,
     val luci_url: String?,
     val lat: Double?,
     val lng: Double?,
@@ -250,13 +268,14 @@ interface NetCtrlApi {
 }
 
 fun buildApi(baseUrl: String): NetCtrlApi {
+    val logging = HttpLoggingInterceptor().apply { 
+        level = HttpLoggingInterceptor.Level.BODY 
+    }
     val client = OkHttpClient.Builder()
         .connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .writeTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
-        .addInterceptor(HttpLoggingInterceptor().apply {
-            level = HttpLoggingInterceptor.Level.BASIC
-        })
+        .addInterceptor(logging)
         .build()
     return Retrofit.Builder()
         .baseUrl(if (baseUrl.endsWith("/")) baseUrl else "$baseUrl/")

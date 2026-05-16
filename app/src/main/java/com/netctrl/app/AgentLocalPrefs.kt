@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 private val Context.agentLocalStore by preferencesDataStore("agent_local_v2")
 
 data class AgentLocalSettings(
+    val displayName: String = "",
     val ip: String = "",
     val sshPort: Int = 22,
     val luciPort: Int = 80,

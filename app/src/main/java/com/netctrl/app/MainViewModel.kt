@@ -133,7 +133,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         loadH3363tData()
     }
 
-    private fun loadAgentDetail(agentId: String) {
+    fun loadAgentDetail(agentId: String) {
         val s = _ui.value
         viewModelScope.launch {
             try {
@@ -170,33 +170,73 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val owmList = api.agents(bearer).data ?: emptyList()
                 val localMap = agentLocalPrefs.loadAll(owmList.map { it.agent_id })
 
+                // Запрашиваем полные данные для каждого агента через /api/v1/agents/{id}
                 val full = owmList.map { a ->
                     val settings = localMap[a.agent_id] ?: AgentLocalSettings()
-                    val ramFreeBytes = ((a.ram_total ?: 0L) - (a.ram_usage ?: 0L)) * 1024L * 1024L
-                    val ramTotalBytes = (a.ram_total ?: 0L) * 1024L * 1024L
-                    AgentFull(
-                        agent_id = a.agent_id,
-                        online = a.online,
-                        last_seen_secs = a.last_seen_secs,
-                        display_name = a.agent_name,
-                        address = settings.physicalAddress.ifBlank { null },
-                        local_ip = settings.ip.ifBlank { null },
-                        luci_url = if (settings.ip.isNotBlank()) "http://${settings.ip}:${settings.luciPort}" else null,
-                        lat = settings.lat,
-                        lng = settings.lon,
-                        metric = if (a.online) Metric(
-                            timestamp = a.last_seen_secs ?: 0L,
-                            uptime = 0.0,
-                            load1 = a.cpu_load ?: 0.0,
-                            load5 = a.cpu_load ?: 0.0,
-                            load15 = a.cpu_load ?: 0.0,
+                    
+                    // Пытаемся получить полные данные агента с метриками
+                    val detailData = try {
+                        val resp = api.getAgent(a.agent_id)
+                        android.util.Log.d("H3363T-Agent", "Response for ${a.agent_id}: ${resp.data?.metrics}")
+                        resp.data
+                    } catch (e: Exception) {
+                        android.util.Log.e("H3363T-Agent", "Error fetching ${a.agent_id}: ${e.message}")
+                        null
+                    }
+                    
+                    // IP: приоритет — из ответа сервера (local_ip), затем fallback для Vontar X3
+                    val serverIp = detailData?.local_ip
+                    val fallbackIp = if (a.agent_id.contains("x3", ignoreCase = true) || a.agent_id.contains("vontar", ignoreCase = true)) {
+                        "95.174.102.25" // Fallback только для Vontar X3
+                    } else {
+                        null
+                    }
+                    val effectiveIp = serverIp?.ifBlank { null } ?: settings.ip.ifBlank { null } ?: fallbackIp
+                    
+                    // displayName из настроек имеет приоритет
+                    val displayName = settings.displayName.ifBlank { detailData?.display_name ?: a.agent_id }
+                    
+                    // Метрики из detailData
+                    val metric = if (a.online && detailData?.metrics != null) {
+                        val m = detailData.metrics
+                        android.util.Log.d("H3363T-Metrics", "Raw metrics for ${a.agent_id}: temp=${m.temperature}, wifi=${m.wifi_clients}, cpu=${m.cpu_load}, ram=${m.ram_usage}/${m.ram_total}")
+                        val ramTotalBytes = (m.ram_total ?: 0L) * 1024L * 1024L
+                        val ramUsedBytes = (m.ram_usage ?: 0L) * 1024L * 1024L
+                        val ramFreeBytes = ramTotalBytes - ramUsedBytes
+                        Metric(
+                            timestamp = m.timestamp ?: (a.last_seen_secs ?: 0L),
+                            uptime = (m.uptime ?: 0L).toDouble(),
+                            load1 = m.cpu_load ?: 0.0,
+                            load5 = m.cpu_load ?: 0.0,
+                            load15 = m.cpu_load ?: 0.0,
                             mem_free = ramFreeBytes,
                             mem_total = ramTotalBytes,
-                            temperature = null,
-                            wifi_clients = a.wifi_clients,
-                            wan_rx = null,
-                            wan_tx = null
-                        ) else null
+                            temperature = m.temperature?.toFloat(),
+                            wifi_clients = m.wifi_clients,
+                            wan_rx = m.wan_rx_bytes,
+                            wan_tx = m.wan_tx_bytes
+                        )
+                    } else null
+                    
+                    // Порог online: 4 часа (14400 секунд)
+                    val diff = a.last_seen_secs?.let { 
+                        if (it > 1_000_000_000L) (System.currentTimeMillis() / 1000 - it) else it 
+                    } ?: Long.MAX_VALUE
+                    val isOnline = diff < 14400
+                    android.util.Log.d("H3363T-Status", "agent=${a.agent_id} diff=${diff}s threshold=14400 online=$isOnline")
+
+                    AgentFull(
+                        agent_id = a.agent_id,
+                        online = isOnline,
+                        last_seen_secs = a.last_seen_secs,
+                        display_name = displayName,
+                        address = settings.physicalAddress.ifBlank { detailData?.address },
+                        local_ip = effectiveIp,
+                        internal_ip = detailData?.internal_ip,
+                        luci_url = if (effectiveIp != null) "http://${effectiveIp}:${settings.luciPort}" else (detailData?.luci_url),
+                        lat = settings.lat ?: detailData?.lat,
+                        lng = settings.lon ?: detailData?.lng,
+                        metric = metric
                     )
                 }
                 _ui.update {
@@ -226,7 +266,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openAgentWeb(agent: AgentFull, type: String) {
         when (type) {
-            "__terminal__" -> _ui.update { it.copy(screen = Screen.SshTerminal(agent)) }
+            "__terminal__" -> openNativeSsh(agent)
             "__luci__" -> _ui.update { it.copy(screen = Screen.LuciView(agent)) }
             else -> _ui.update { it.copy(screen = Screen.Web(type)) }
         }
@@ -544,19 +584,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateAgentIp(agentId: String, newIp: String) {
-        val s = _ui.value
-        viewModelScope.launch {
-            try {
-                buildApi(s.serverUrl).createAgent(
-                    "Bearer ${s.token}",
-                    CreateAgentRequest(agent_id = agentId, local_ip = newIp, ssh_host = newIp)
-                )
-                fetchAgents(s.serverUrl, s.token)
-            } catch (_: Exception) {}
-        }
-    }
-
     fun setSidebarOpen(open: Boolean) {
         _ui.update { it.copy(sidebarOpen = open) }
     }
@@ -585,10 +612,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sshSession?.disconnect()
         val s = _ui.value
         val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
-        val host = localSettings.ip.ifBlank { agent.local_ip ?: "" }
-        val port = localSettings.sshPort
+
+        // ЗАДАЧА 1: IP берется ТОЛЬКО из локальных настроек
+        val host = localSettings.ip.takeIf { it.isNotBlank() } ?: run {
+            android.util.Log.e("H3363T-SSH", "No IP configured for ${agent.agent_id}")
+            _ui.update { it.copy(error = "Укажите IP роутера в Настройках агента") }
+            return
+        }
+
+        val port = localSettings.sshPort.takeIf { it > 0 } ?: 22
         val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
         val pass = credentialStore.getSshPass(agent.agent_id)
+
+        android.util.Log.d("H3363T-SSH", "Connecting to $host:$port as $login")
+        
         sshSession = SshSessionManager(viewModelScope).also { mgr ->
             viewModelScope.launch {
                 mgr.output.collect { out -> _ui.update { it.copy(sshOutput = out) } }
@@ -596,12 +633,15 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch {
                 mgr.connected.collect { c -> _ui.update { it.copy(sshConnected = c, sshConnecting = false) } }
             }
-            _ui.update { it.copy(sshOutput = "", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
+            _ui.update { it.copy(sshOutput = "Connecting to $host:$port...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
             mgr.connect(host, port, login, pass)
         }
     }
 
     fun sshSendLine(line: String) { sshSession?.sendLine(line) }
+    fun sshSend(text: String) { sshSession?.sendRaw(text) }
+    fun sshSendByte(b: Byte) { sshSession?.sendByte(b) }
+    fun sshSendBytes(data: ByteArray) { sshSession?.sendBytes(data) }
 
     fun closeSsh() {
         sshSession?.disconnect()

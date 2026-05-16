@@ -1,13 +1,20 @@
 package com.netctrl.app
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
@@ -19,6 +26,9 @@ class LocalNodeManager {
 
     private val _peerCount = MutableStateFlow(0)
     val peerCount: StateFlow<Int> = _peerCount.asStateFlow()
+
+    private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var reconnectJob: Job? = null
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(3, TimeUnit.SECONDS)
@@ -43,10 +53,22 @@ class LocalNodeManager {
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             _connected.value = false
+            android.util.Log.d("H3363T-LocalNode", "Local WS closed, reconnecting in 3s")
+            scheduleReconnect(3000L)
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             _connected.value = false
+            android.util.Log.d("H3363T-LocalNode", "Local WS failure, reconnecting in 3s")
+            scheduleReconnect(3000L)
+        }
+    }
+
+    private fun scheduleReconnect(delayMs: Long) {
+        reconnectJob?.cancel()
+        reconnectJob = scope.launch {
+            delay(delayMs)
+            connect()
         }
     }
 
@@ -66,6 +88,8 @@ class LocalNodeManager {
     }
 
     fun disconnect() {
+        reconnectJob?.cancel()
+        scope.cancel()
         webSocket?.close(1000, "Disconnecting")
         webSocket = null
         _connected.value = false
