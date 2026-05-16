@@ -2564,16 +2564,16 @@ fun AgentSettingsScreen(
     val agent = ui.agents.find { it.agent_id == agentId }
     val initLocal = ui.agentLocalMap[agentId] ?: AgentLocalSettings()
 
+    // ЗАДАЧА 2: Упрощенная форма — единый логин/пароль для SSH и LuCI
     var ip by remember(agentId) { mutableStateOf(initLocal.ip) }
     var sshPort by remember(agentId) { mutableStateOf(initLocal.sshPort.toString()) }
     var luciPort by remember(agentId) { mutableStateOf(initLocal.luciPort.toString()) }
     var address by remember(agentId) { mutableStateOf(initLocal.physicalAddress) }
     var lat by remember(agentId) { mutableStateOf(initLocal.lat?.toString() ?: "") }
     var lon by remember(agentId) { mutableStateOf(initLocal.lon?.toString() ?: "") }
-    var sshLogin by remember(agentId) { mutableStateOf(vm.credentialStore.getSshLogin(agentId)) }
-    var sshPass by remember(agentId) { mutableStateOf(vm.credentialStore.getSshPass(agentId)) }
-    var luciLogin by remember(agentId) { mutableStateOf(vm.credentialStore.getLuciLogin(agentId)) }
-    var luciPass by remember(agentId) { mutableStateOf(vm.credentialStore.getLuciPass(agentId)) }
+    // Единые креды для SSH и LuCI
+    var login by remember(agentId) { mutableStateOf(vm.credentialStore.getSshLogin(agentId).ifBlank { vm.credentialStore.getLuciLogin(agentId) }) }
+    var pass by remember(agentId) { mutableStateOf(vm.credentialStore.getSshPass(agentId).ifBlank { vm.credentialStore.getLuciPass(agentId) }) }
     var geocoding by remember { mutableStateOf(false) }
     var geocodeError by remember { mutableStateOf("") }
 
@@ -2584,8 +2584,9 @@ fun AgentSettingsScreen(
                 navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = TextSecondary) } },
                 actions = {
                     TextButton(onClick = {
-                        vm.credentialStore.saveSsh(agentId, sshLogin, sshPass)
-                        vm.credentialStore.saveLuci(agentId, luciLogin, luciPass)
+                        // Сохраняем единые креды в оба хранилища (SSH и LuCI)
+                        vm.credentialStore.saveSsh(agentId, login, pass)
+                        vm.credentialStore.saveLuci(agentId, login, pass)
                         vm.saveAgentLocalSettings(agentId, AgentLocalSettings(
                             ip = ip,
                             sshPort = sshPort.toIntOrNull() ?: 22,
@@ -2612,7 +2613,7 @@ fun AgentSettingsScreen(
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value = ip, onValueChange = { ip = it },
-                    label = { Text("IP адрес") },
+                    label = { Text("IP адрес роутера (LAN)") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = customOutlinedColors()
                 )
@@ -2633,36 +2634,18 @@ fun AgentSettingsScreen(
                 }
             }
             item {
-                Text("SSH", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Доступ (SSH + LuCI)", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
-                    value = sshLogin, onValueChange = { sshLogin = it },
-                    label = { Text("Логин SSH") },
+                    value = login, onValueChange = { login = it },
+                    label = { Text("Логин") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = customOutlinedColors()
                 )
                 Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = sshPass, onValueChange = { sshPass = it },
-                    label = { Text("Пароль SSH") },
-                    visualTransformation = PasswordVisualTransformation(),
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = customOutlinedColors()
-                )
-            }
-            item {
-                Text("LuCI", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = luciLogin, onValueChange = { luciLogin = it },
-                    label = { Text("Логин LuCI") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = customOutlinedColors()
-                )
-                Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = luciPass, onValueChange = { luciPass = it },
-                    label = { Text("Пароль LuCI") },
+                    value = pass, onValueChange = { pass = it },
+                    label = { Text("Пароль") },
                     visualTransformation = PasswordVisualTransformation(),
                     modifier = Modifier.fillMaxWidth(),
                     colors = customOutlinedColors()
@@ -2673,7 +2656,7 @@ fun AgentSettingsScreen(
                 Spacer(Modifier.height(4.dp))
                 OutlinedTextField(
                     value = address, onValueChange = { address = it },
-                    label = { Text("Физический адрес") },
+                    label = { Text("Физический адрес / метка") },
                     modifier = Modifier.fillMaxWidth(),
                     trailingIcon = {
                         if (geocoding) {
