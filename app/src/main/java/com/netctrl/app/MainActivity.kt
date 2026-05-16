@@ -2564,10 +2564,7 @@ fun AgentSettingsScreen(
     val agent = ui.agents.find { it.agent_id == agentId }
     val initLocal = ui.agentLocalMap[agentId] ?: AgentLocalSettings()
 
-    // ЗАДАЧА 2: Упрощенная форма — единый логин/пароль для SSH и LuCI
-    var ip by remember(agentId) { mutableStateOf(initLocal.ip) }
-    var sshPort by remember(agentId) { mutableStateOf(initLocal.sshPort.toString()) }
-    var luciPort by remember(agentId) { mutableStateOf(initLocal.luciPort.toString()) }
+    // ЗАДАЧА 1: Упрощенная форма — только логины/пароли и локация
     var address by remember(agentId) { mutableStateOf(initLocal.physicalAddress) }
     var lat by remember(agentId) { mutableStateOf(initLocal.lat?.toString() ?: "") }
     var lon by remember(agentId) { mutableStateOf(initLocal.lon?.toString() ?: "") }
@@ -2588,9 +2585,9 @@ fun AgentSettingsScreen(
                         vm.credentialStore.saveSsh(agentId, login, pass)
                         vm.credentialStore.saveLuci(agentId, login, pass)
                         vm.saveAgentLocalSettings(agentId, AgentLocalSettings(
-                            ip = ip,
-                            sshPort = sshPort.toIntOrNull() ?: 22,
-                            luciPort = luciPort.toIntOrNull() ?: 80,
+                            ip = initLocal.ip, // IP больше не редактируется здесь
+                            sshPort = initLocal.sshPort,
+                            luciPort = initLocal.luciPort,
                             physicalAddress = address,
                             lat = lat.toDoubleOrNull(),
                             lon = lon.toDoubleOrNull()
@@ -2608,31 +2605,6 @@ fun AgentSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item {
-                Text("Сеть", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-                Spacer(Modifier.height(4.dp))
-                OutlinedTextField(
-                    value = ip, onValueChange = { ip = it },
-                    label = { Text("IP адрес роутера (LAN)") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = customOutlinedColors()
-                )
-                Spacer(Modifier.height(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = sshPort, onValueChange = { sshPort = it },
-                        label = { Text("SSH порт") },
-                        modifier = Modifier.weight(1f),
-                        colors = customOutlinedColors()
-                    )
-                    OutlinedTextField(
-                        value = luciPort, onValueChange = { luciPort = it },
-                        label = { Text("LuCI порт") },
-                        modifier = Modifier.weight(1f),
-                        colors = customOutlinedColors()
-                    )
-                }
-            }
             item {
                 Text("Доступ (SSH + LuCI)", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
