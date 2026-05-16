@@ -596,7 +596,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(screen = Screen.SshTerminal(agent)) }
     }
 
+    // ЗАДАЧА 3: LuCI использует IP и порт из локальных настроек
     fun openLuci(agent: AgentFull) {
+        val s = _ui.value
+        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+        
+        val ip = localSettings.ip.takeIf { it.isNotBlank() } ?: run {
+            android.util.Log.e("H3363T-LuCI", "No IP configured for ${agent.agent_id}")
+            _ui.update { it.copy(error = "Укажите IP роутера в Настройках") }
+            return
+        }
+        
+        val port = localSettings.luciPort.takeIf { it > 0 } ?: 80
+        val url = "http://$ip:$port"
+        android.util.Log.d("H3363T-LuCI", "Opening $url")
+        
         _ui.update { it.copy(screen = Screen.LuciView(agent)) }
     }
 
