@@ -496,9 +496,60 @@ fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                 ) { Text("Отмена") }
             }
         }
+        // ЗАДАЧА 2: Секция с командой установки агента
         item {
-            TextButton(onClick = { vm.installAgent() }) {
-                Text("Показать команду установки", color = TextSecondary, fontSize = 12.sp)
+            var showInstallCmd by remember { mutableStateOf(false) }
+            val serverUrl = "ws://95.174.102.25:9090/agent"
+            val installCmd = """
+                opkg update && opkg install curl
+                SERVER_URL="$serverUrl"
+                curl -fsSL http://95.174.102.25/install-agent.sh | SERVER_URL="$serverUrl" sh
+            """.trimIndent()
+
+            TextButton(onClick = { showInstallCmd = !showInstallCmd }) {
+                Text(
+                    if (showInstallCmd) "Скрыть команду установки" else "Показать команду установки",
+                    color = Color(0xFF9070E8)
+                )
+            }
+
+            if (showInstallCmd) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    Text("Команда для OpenWrt:", color = Color(0xFF5A5080), fontSize = 12.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0A0818), RoundedCornerShape(8.dp))
+                            .padding(12.dp)
+                    ) {
+                        androidx.compose.foundation.text.selection.SelectionContainer {
+                            Text(
+                                text = installCmd,
+                                color = Color(0xFF50FA7B),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            clipboardManager.setText(AnnotatedString(installCmd))
+                            Toast.makeText(
+                                LocalContext.current,
+                                "Скопировано",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7050C8)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(8.dp))
+                        Text("Копировать команду")
+                    }
+                }
             }
         }
     }
