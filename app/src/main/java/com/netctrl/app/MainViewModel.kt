@@ -642,8 +642,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             viewModelScope.launch {
                 mgr.connected.collect { c -> _ui.update { it.copy(sshConnected = c, sshConnecting = false) } }
             }
-            _ui.update { it.copy(sshOutput = "Connecting to $host:$port...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
-            mgr.connect(host, port, login, pass)
+            _ui.update { it.copy(sshOutput = "Connecting to $host:22...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
+            mgr.connect(host, 22, login, pass)
         }
     }
 
