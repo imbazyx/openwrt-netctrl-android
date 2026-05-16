@@ -501,6 +501,7 @@ fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
         // ЗАДАЧА 2: Секция с командой установки агента
         item {
             var showInstallCmd by remember { mutableStateOf(false) }
+            val context = LocalContext.current
             val serverUrl = "ws://95.174.102.25:9090/agent"
             val installCmd = """
                 opkg update && opkg install curl
@@ -539,7 +540,7 @@ fun AddRouterContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
                         onClick = {
                             clipboardManager.setText(AnnotatedString(installCmd))
                             Toast.makeText(
-                                LocalContext.current,
+                                context,
                                 "Скопировано",
                                 Toast.LENGTH_SHORT
                             ).show()
