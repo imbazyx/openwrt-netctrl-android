@@ -2774,8 +2774,8 @@ fun NativeSshScreen(
                     }
                 }
 
-                // Строка ввода — промпт + поле (Termux-style: отправка по символу)
-                var inputText by remember { mutableStateOf("") }
+                // ЗАДАЧА 4: Ввод буферизуется, отправка по Enter
+                var inputBuffer by remember { mutableStateOf("") }
 
                 Row(
                     Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp, vertical = 4.dp),
@@ -2788,20 +2788,8 @@ fun NativeSshScreen(
                         fontSize = 13.sp
                     )
                     BasicTextField(
-                        value = TextFieldValue(inputText),
-                        onValueChange = { newValue ->
-                            val oldText = inputText
-                            val newText = newValue.text
-                            if (newText.length > oldText.length) {
-                                // Отправляем только новые символы
-                                val added = newText.substring(oldText.length)
-                                vm.sshSend(added)
-                            } else if (newText.length < oldText.length) {
-                                // Backspace: отправляем \b
-                                vm.sshSend("\b")
-                            }
-                            inputText = newText
-                        },
+                        value = TextFieldValue(inputBuffer),
+                        onValueChange = { inputBuffer = it.text },
                         modifier = Modifier.weight(1f),
                         enabled = connected,
                         textStyle = TextStyle(
@@ -2811,8 +2799,15 @@ fun NativeSshScreen(
                         ),
                         cursorBrush = SolidColor(Color(0xFF50FA7B)),
                         singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.None),
-                        keyboardActions = KeyboardActions()
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(
+                            onSend = {
+                                if (connected && inputBuffer.isNotEmpty()) {
+                                    vm.sshSend(inputBuffer + "\n")
+                                    inputBuffer = ""
+                                }
+                            }
+                        )
                     )
                 }
             }
