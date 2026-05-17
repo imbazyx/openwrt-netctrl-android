@@ -660,13 +660,6 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
     }
 
-
-    fun closeSsh() {
-        sshSession?.disconnect()
-        sshSession = null
-        _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
-    }
-
     // ─── Local Settings CRUD ───
 
     fun openAgentSettings(agentId: String) {
