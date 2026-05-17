@@ -622,12 +622,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         navigateTo(Screen.Metrics)
     }
 
-    // ─── Native SSH Proxy ───
+    // ─── Native SSH Relay ───
 
-    private var sshProxy: SshProxyManager? = null
+    private var sshRelay: SshRelayManager? = null
 
     fun openNativeSsh(agent: AgentFull) {
-        sshProxy?.disconnect()
+        sshRelay?.disconnect()
 
         val s = _ui.value
         val token = s.token ?: run {
@@ -635,28 +635,57 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
 
+        // Всегда через relay — работает из любой точки мира
         val wsUrl = "${s.serverUrl.replace("http", "ws")}/api/v1/ssh/ws/${agent.agent_id}?token=$token"
-        android.util.Log.d("H3363T-SSH", "Connecting via proxy: $wsUrl")
+        android.util.Log.d("H3363T-SSH", "Opening SSH relay to ${agent.agent_id} via $wsUrl")
 
-        sshProxy = SshProxyManager().also { mgr ->
-            _ui.update { it.copy(sshOutput = "Connecting via server proxy...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
-            
-            viewModelScope.launch {
-                mgr.connect(wsUrl,
-                    onOutput = { text -> _ui.update { it.copy(sshOutput = it.sshOutput + text) } },
-                    onError = { err -> _ui.update { it.copy(sshOutput = it.sshOutput + "\n[ERR] $err\n", sshConnecting = false) } },
-                    onClosed = { _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[Disconnected]\r\n", sshConnected = false, sshConnecting = false) } }
+        _ui.update { it.copy(
+            screen = Screen.NativeSsh(agent),
+            sshOutput = "Connecting to ${agent.agent_id} via H3363T relay...\n",
+            sshConnecting = true
+        )}
+
+        sshRelay = SshRelayManager().also { mgr ->
+            viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+                mgr.connect(
+                    url = wsUrl,
+                    onOutput = { text ->
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            _ui.update { it.copy(sshOutput = it.sshOutput + text) }
+                        }
+                    },
+                    onConnected = {
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            _ui.update { it.copy(sshOutput = it.sshOutput + "Connected.\r\n", sshConnecting = false, sshConnected = true) }
+                            Log.d("H3363T-SSH", "SSH relay connected")
+                        }
+                    },
+                    onError = { err ->
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[ERROR] $err\r\n", sshConnecting = false) }
+                            Log.e("H3363T-SSH", "SSH relay error: $err")
+                        }
+                    },
+                    onDisconnected = {
+                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[Disconnected]\r\n", sshConnected = false, sshConnecting = false) }
+                        }
+                    }
                 )
             }
         }
     }
 
-    fun sshSendLine(line: String) { sshProxy?.send("$line\n") }
-    fun sshSend(text: String) { sshProxy?.send(text) }
+    fun sendSshCommand(cmd: String) {
+        _ui.update { it.copy(sshOutput = it.sshOutput + cmd + "\n") }
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sshRelay?.send(cmd)
+        }
+    }
 
     fun closeSsh() {
-        sshProxy?.disconnect()
-        sshProxy = null
+        sshRelay?.disconnect()
+        sshRelay = null
         _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
     }
 
@@ -733,35 +762,51 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         wsManager?.disconnect()
         localNodeManager.disconnect()
-        sshProxy?.disconnect()
-        sshProxy = null
+        sshRelay?.disconnect()
+        sshRelay = null
     }
 }
 
-class SshProxyManager {
+class SshRelayManager {
     private var ws: WebSocket? = null
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(30, TimeUnit.SECONDS)
         .build()
 
-    fun connect(url: String, onOutput: (String) -> Unit, onError: (String) -> Unit, onClosed: () -> Unit) {
+    fun connect(
+        url: String,
+        onOutput: (String) -> Unit,
+        onConnected: () -> Unit,
+        onError: (String) -> Unit,
+        onDisconnected: () -> Unit
+    ) {
+        disconnect()
         val request = Request.Builder().url(url).build()
         ws = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                onOutput("Connected.\r\n")
+                Log.d("H3363T-SSH", "Relay WS opened")
+                onConnected()
             }
             override fun onMessage(webSocket: WebSocket, text: String) {
                 onOutput(text)
             }
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                onError("Connection failed: ${t.message}")
+                Log.e("H3363T-SSH", "Relay WS failure: ${t.message}")
+                onError(t.message ?: "Unknown error")
             }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                onClosed()
+                onDisconnected()
             }
         })
     }
 
-    fun send(text: String) { ws?.send(text) }
-    fun disconnect() { ws?.close(1000, "User closed"); ws = null }
+    fun send(text: String): Boolean = ws?.send(text) ?: false
+
+    fun disconnect() {
+        ws?.close(1000, "User closed")
+        ws = null
+    }
+
+    fun isConnected(): Boolean = ws != null
 }
