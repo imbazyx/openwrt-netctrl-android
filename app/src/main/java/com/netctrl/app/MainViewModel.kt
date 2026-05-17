@@ -8,6 +8,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import okhttp3.*
+import java.util.concurrent.TimeUnit
 
 private fun decodeJwtRole(token: String): String {
     return try {
@@ -620,44 +622,44 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         navigateTo(Screen.Metrics)
     }
 
-    // ─── Native SSH ───
+    // ─── Native SSH Proxy ───
+
+    private var sshProxy: SshProxyManager? = null
 
     fun openNativeSsh(agent: AgentFull) {
-        sshSession?.disconnect()
+        sshProxy?.disconnect()
 
         val s = _ui.value
-        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+        val token = s.token ?: run {
+            _ui.update { it.copy(error = "Необходима авторизация") }
+            return
+        }
 
-        // ЗАДАЧА 5: IP берется из agent.local_ip (API) или manual IP из настроек
-        val host = agent.local_ip?.takeIf { it.isNotBlank() }
-            ?: localSettings.ip.takeIf { it.isNotBlank() }
-            ?: run {
-                android.util.Log.e("H3363T-SSH", "No IP for ${agent.agent_id}")
-                _ui.update { it.copy(error = "IP не получен. Укажите в Настройках агента.") }
-                return
-            }
+        val wsUrl = "${s.serverUrl.replace("http", "ws")}/api/v1/ssh/ws/${agent.agent_id}?token=$token"
+        android.util.Log.d("H3363T-SSH", "Connecting via proxy: $wsUrl")
 
-        val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
-        val pass = credentialStore.getSshPass(agent.agent_id)
-
-        android.util.Log.d("H3363T-SSH", "Connecting to $host:22 as $login")
-
-        sshSession = SshSessionManager(viewModelScope).also { mgr ->
+        sshProxy = SshProxyManager().also { mgr ->
+            _ui.update { it.copy(sshOutput = "Connecting via server proxy...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
+            
             viewModelScope.launch {
-                mgr.output.collect { out -> _ui.update { it.copy(sshOutput = out) } }
+                mgr.connect(wsUrl,
+                    onOutput = { text -> _ui.update { it.copy(sshOutput = it.sshOutput + text) } },
+                    onError = { err -> _ui.update { it.copy(sshOutput = it.sshOutput + "\n[ERR] $err\n", sshConnecting = false) } },
+                    onClosed = { _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[Disconnected]\r\n", sshConnected = false, sshConnecting = false) } }
+                )
             }
-            viewModelScope.launch {
-                mgr.connected.collect { c -> _ui.update { it.copy(sshConnected = c, sshConnecting = false) } }
-            }
-            _ui.update { it.copy(sshOutput = "Connecting to $host:22...\n", sshConnecting = true, screen = Screen.NativeSsh(agent)) }
-            mgr.connect(host, 22, login, pass)
         }
     }
 
-    fun sshSendLine(line: String) { sshSession?.sendLine(line) }
-    fun sshSend(text: String) { sshSession?.sendRaw(text) }
-    fun sshSendByte(b: Byte) { sshSession?.sendByte(b) }
-    fun sshSendBytes(data: ByteArray) { sshSession?.sendBytes(data) }
+    fun sshSendLine(line: String) { sshProxy?.send("$line\n") }
+    fun sshSend(text: String) { sshProxy?.send(text) }
+
+    fun closeSsh() {
+        sshProxy?.disconnect()
+        sshProxy = null
+        _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
+    }
+
 
     fun closeSsh() {
         sshSession?.disconnect()
@@ -680,7 +682,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         if (s.token == null) return
         viewModelScope.launch {
             try {
-                api.updateAgent("Bearer ${s.token}", agentId, UpdateAgentRequest(displayName = displayName))
+                buildApi(s.serverUrl).updateAgent("Bearer ${s.token}", agentId, UpdateAgentRequest(displayName = displayName))
                 fetchAgents(s.serverUrl, s.token)
             } catch (e: Exception) {
                 android.util.Log.e("H3363T-VM", "updateAgent failed", e)
@@ -738,7 +740,35 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         super.onCleared()
         wsManager?.disconnect()
         localNodeManager.disconnect()
-        sshSession?.disconnect()
-        sshSession = null
+        sshProxy?.disconnect()
+        sshProxy = null
     }
+}
+
+class SshProxyManager {
+    private var ws: WebSocket? = null
+    private val client = OkHttpClient.Builder()
+        .readTimeout(0, TimeUnit.MILLISECONDS)
+        .build()
+
+    fun connect(url: String, onOutput: (String) -> Unit, onError: (String) -> Unit, onClosed: () -> Unit) {
+        val request = Request.Builder().url(url).build()
+        ws = client.newWebSocket(request, object : WebSocketListener() {
+            override fun onOpen(webSocket: WebSocket, response: Response) {
+                onOutput("Connected.\r\n")
+            }
+            override fun onMessage(webSocket: WebSocket, text: String) {
+                onOutput(text)
+            }
+            override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                onError("Connection failed: ${t.message}")
+            }
+            override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                onClosed()
+            }
+        })
+    }
+
+    fun send(text: String) { ws?.send(text) }
+    fun disconnect() { ws?.close(1000, "User closed"); ws = null }
 }
