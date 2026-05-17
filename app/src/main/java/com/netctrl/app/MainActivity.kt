@@ -2066,14 +2066,6 @@ fun DetailScreen(
                                 InfoRow("WAN", "↓${formatBytes(m.wan_rx_bytes)}  ↑${formatBytes(m.wan_tx_bytes)}")
                             m.node_status?.let { InfoRow("H3363T нода", it) }
                             m.node_peer_count?.let { InfoRow("Пиры", it.toString()) }
-                        } ?: agent.metric?.let { m ->
-                            InfoRow("Uptime", formatUptime(m.uptime))
-                            InfoRow("CPU Load", "%.2f".format(m.load1))
-                            InfoRow("RAM", memPercent(m.mem_free, m.mem_total))
-                            InfoRow("Температура", m.temperature?.let { "%.1f°C".format(it) } ?: "N/A")
-                            m.wifi_clients?.let { InfoRow("WiFi клиенты", it.toString()) }
-                            if (m.wan_rx != null || m.wan_tx != null)
-                                InfoRow("WAN", "↓${formatBytes(m.wan_rx)}  ↑${formatBytes(m.wan_tx)}")
                         }
                     }
                 }
