@@ -2541,14 +2541,22 @@ fun RouterCard(
                 }
                 // Статус badge + стрелка
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = if (agent.online) "online" else "offline",
-                        color = if (agent.online) Color(0xFF4CAF50) else Color(0xFFF44336),
-                        fontSize = 11.sp,
-                        modifier = Modifier
-                            .background(Color(0x20FFFFFF), RoundedCornerShape(4.dp))
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (agent.online) Color(0xFF4CAF50) else Color(0xFFF44336),
+                                    CircleShape
+                                )
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (agent.online) "relay active" else "agent offline",
+                            fontSize = 10.sp,
+                            color = if (agent.online) Color(0xFF4CAF50) else Color(0xFFF44336)
+                        )
+                    }
                     Icon(
                         imageVector = if (isExpanded) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
                         contentDescription = null,
