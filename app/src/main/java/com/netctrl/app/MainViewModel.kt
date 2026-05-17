@@ -596,17 +596,21 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(screen = Screen.SshTerminal(agent)) }
     }
 
-    // ЗАДАЧА 1: LuCI использует IP из agent.local_ip (API)
     fun openLuci(agent: AgentFull) {
-        val host = agent.local_ip?.takeIf { it.isNotBlank() } ?: run {
-            android.util.Log.e("H3363T-LuCI", "local_ip is null/blank for ${agent.agent_id}")
-            _ui.update { it.copy(error = "Роутер не передал IP. Убедитесь что агент запущен и онлайн.") }
-            return
-        }
-        
+        val s = _ui.value
+        val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+
+        val host = agent.local_ip?.takeIf { it.isNotBlank() }
+            ?: localSettings.ip.takeIf { it.isNotBlank() }
+            ?: run {
+                android.util.Log.e("H3363T-LuCI", "No IP for ${agent.agent_id}")
+                _ui.update { it.copy(error = "IP не получен. Укажите в Настройках агента.") }
+                return
+            }
+
         val url = "http://$host:80"
         android.util.Log.d("H3363T-LuCI", "Opening $url")
-        
+
         _ui.update { it.copy(screen = Screen.LuciView(agent)) }
     }
 
@@ -620,21 +624,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun openNativeSsh(agent: AgentFull) {
         sshSession?.disconnect()
-        
-        // ЗАДАЧА 1: IP берется из agent.local_ip (API)
-        val host = agent.local_ip?.takeIf { it.isNotBlank() } ?: run {
-            android.util.Log.e("H3363T-SSH", "local_ip is null/blank for ${agent.agent_id}")
-            _ui.update { it.copy(error = "Роутер не передал IP. Убедитесь что агент запущен и онлайн.") }
-            return
-        }
 
         val s = _ui.value
         val localSettings = s.agentLocalMap[agent.agent_id] ?: AgentLocalSettings()
+
+        // ЗАДАЧА 5: IP берется из agent.local_ip (API) или manual IP из настроек
+        val host = agent.local_ip?.takeIf { it.isNotBlank() }
+            ?: localSettings.ip.takeIf { it.isNotBlank() }
+            ?: run {
+                android.util.Log.e("H3363T-SSH", "No IP for ${agent.agent_id}")
+                _ui.update { it.copy(error = "IP не получен. Укажите в Настройках агента.") }
+                return
+            }
+
         val login = credentialStore.getSshLogin(agent.agent_id).ifBlank { "root" }
         val pass = credentialStore.getSshPass(agent.agent_id)
 
         android.util.Log.d("H3363T-SSH", "Connecting to $host:22 as $login")
-        
+
         sshSession = SshSessionManager(viewModelScope).also { mgr ->
             viewModelScope.launch {
                 mgr.output.collect { out -> _ui.update { it.copy(sshOutput = out) } }
