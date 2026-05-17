@@ -2610,7 +2610,8 @@ fun AgentSettingsScreen(
     val agent = ui.agents.find { it.agent_id == agentId }
     val initLocal = ui.agentLocalMap[agentId] ?: AgentLocalSettings()
 
-    // ЗАДАЧА 1: Упрощенная форма — только логины/пароли и локация
+    var displayName by remember(agentId) { mutableStateOf(agent?.display_name ?: "") }
+    var manualIp by remember(agentId) { mutableStateOf(initLocal.ip) }
     var address by remember(agentId) { mutableStateOf(initLocal.physicalAddress) }
     var lat by remember(agentId) { mutableStateOf(initLocal.lat?.toString() ?: "") }
     var lon by remember(agentId) { mutableStateOf(initLocal.lon?.toString() ?: "") }
@@ -2630,8 +2631,9 @@ fun AgentSettingsScreen(
                         // Сохраняем единые креды в оба хранилища (SSH и LuCI)
                         vm.credentialStore.saveSsh(agentId, login, pass)
                         vm.credentialStore.saveLuci(agentId, login, pass)
+                        vm.updateAgentDisplayName(agentId, displayName.ifBlank { null })
                         vm.saveAgentLocalSettings(agentId, AgentLocalSettings(
-                            ip = initLocal.ip, // IP больше не редактируется здесь
+                            ip = manualIp,
                             sshPort = initLocal.sshPort,
                             luciPort = initLocal.luciPort,
                             physicalAddress = address,
@@ -2651,6 +2653,23 @@ fun AgentSettingsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            item {
+                Text("Основные", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.height(4.dp))
+                OutlinedTextField(
+                    value = displayName, onValueChange = { displayName = it },
+                    label = { Text("Отображаемое имя") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = manualIp, onValueChange = { manualIp = it },
+                    label = { Text("IP адрес роутера (временно)") },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = customOutlinedColors()
+                )
+            }
             item {
                 Text("Доступ (SSH + LuCI)", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))

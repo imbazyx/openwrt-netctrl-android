@@ -668,6 +668,20 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { it.copy(agentSettingsId = null, screen = Screen.Dashboard) }
     }
 
+    fun updateAgentDisplayName(agentId: String, displayName: String?) {
+        val s = _ui.value
+        if (s.token == null) return
+        viewModelScope.launch {
+            try {
+                api.updateAgent("Bearer ${s.token}", agentId, UpdateAgentRequest(displayName = displayName))
+                fetchAgents(s.serverUrl, s.token)
+            } catch (e: Exception) {
+                android.util.Log.e("H3363T-VM", "updateAgent failed", e)
+                _ui.update { it.copy(error = "Ошибка обновления имени: ${e.message}") }
+            }
+        }
+    }
+
     fun saveAgentLocalSettings(agentId: String, settings: AgentLocalSettings) {
         val s = _ui.value
         viewModelScope.launch {

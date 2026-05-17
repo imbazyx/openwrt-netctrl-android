@@ -265,7 +265,20 @@ interface NetCtrlApi {
     suspend fun getAgent(
         @Path("id") id: String
     ): ApiResponse<AgentDetailData>
+
+    @PUT("api/v1/agents/{id}")
+    suspend fun updateAgent(
+        @Header("Authorization") bearer: String,
+        @Path("id") id: String,
+        @Body req: UpdateAgentRequest
+    ): ApiResponse<Unit?>
 }
+
+data class UpdateAgentRequest(
+    @SerializedName("display_name") val displayName: String? = null,
+    @SerializedName("local_ip") val localIp: String? = null,
+    @SerializedName("address") val address: String? = null
+)
 
 fun buildApi(baseUrl: String): NetCtrlApi {
     val logging = HttpLoggingInterceptor().apply { 
