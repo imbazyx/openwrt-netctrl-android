@@ -1,6 +1,12 @@
 package com.netctrl.app
 
 import android.app.Application
+import android.content.Context
+import android.net.nsd.NsdManager
+import android.net.nsd.NsdServiceInfo
+import android.net.wifi.WifiManager
+import android.os.PowerManager
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.async
@@ -10,6 +16,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import okhttp3.*
 import java.util.concurrent.TimeUnit
+
+import com.netctrl.app.NearbyNode
 
 private fun decodeJwtRole(token: String): String {
     return try {
@@ -34,6 +42,45 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     val credentialStore = CredentialStore(app)
     private var sshSession: SshSessionManager? = null
     var mapWebViewCenterCallback: ((Double, Double) -> Unit)? = null
+
+    // WakeLock и WifiLock для поддержания WS-соединения
+    private val powerManager = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+    private val wifiManager = app.getSystemService(Context.WIFI_SERVICE) as WifiManager
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
+
+    // mDNS / NsdManager
+    private val nsdManager = app.getSystemService(Context.NSD_SERVICE) as NsdManager
+    private var discoveryListener: NsdManager.DiscoveryListener? = null
+    private var resolveListener: NsdManager.ResolveListener? = null
+
+    private fun acquireLocks() {
+        if (wakeLock?.isHeld != true) {
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                "H3363T::WsWakeLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire(10 * 60 * 1000L) // 10 минут
+            }
+        }
+        if (wifiLock?.isHeld != true) {
+            wifiLock = wifiManager.createWifiLock(
+                WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                "H3363T::WsWifiLock"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }
+    }
+
+    private fun releaseLocks() {
+        wakeLock?.takeIf { it.isHeld }?.release()
+        wakeLock = null
+        wifiLock?.takeIf { it.isHeld }?.release()
+        wifiLock = null
+    }
 
     init {
         viewModelScope.launch {
@@ -96,6 +143,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             wsManager?.disconnect()
             wsManager = null
+            releaseLocks()
             localNodeManager.disconnect()
             prefs.clear()
             _ui.update { UiState() }
@@ -300,18 +348,17 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private fun connectH3363tWs(url: String, token: String) {
         wsCollectorJob?.cancel()
         wsManager?.disconnect()
+        acquireLocks()
         wsManager = H3363tWebSocketManager().also { manager ->
             manager.connect(url, token)
             wsCollectorJob = viewModelScope.launch {
                 launch {
                     manager.connectionState.collect { connected ->
                         _ui.update { it.copy(h3363tConnected = connected) }
-                        if (!connected) {
-                            delay(5000)
-                            val s = _ui.value
-                            if (s.token.isNotBlank() && s.serverUrl.isNotBlank()) {
-                                manager.connect(s.serverUrl, s.token)
-                            }
+                        if (connected) {
+                            android.util.Log.d("H3363T-VM", "WS connected, locks acquired")
+                        } else {
+                            android.util.Log.d("H3363T-VM", "WS disconnected, reconnect handled by manager")
                         }
                     }
                 }
@@ -650,24 +697,24 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 mgr.connect(
                     url = wsUrl,
                     onOutput = { text ->
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
                             _ui.update { it.copy(sshOutput = it.sshOutput + text) }
                         }
                     },
                     onConnected = {
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        Log.d("H3363T-SSH", "SSH relay connected")
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
                             _ui.update { it.copy(sshOutput = it.sshOutput + "Connected.\r\n", sshConnecting = false, sshConnected = true) }
-                            Log.d("H3363T-SSH", "SSH relay connected")
                         }
                     },
                     onError = { err ->
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        Log.e("H3363T-SSH", "SSH relay error: $err")
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
                             _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[ERROR] $err\r\n", sshConnecting = false) }
-                            Log.e("H3363T-SSH", "SSH relay error: $err")
                         }
                     },
                     onDisconnected = {
-                        withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
                             _ui.update { it.copy(sshOutput = it.sshOutput + "\r\n[Disconnected]\r\n", sshConnected = false, sshConnecting = false) }
                         }
                     }
@@ -687,6 +734,79 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         sshRelay?.disconnect()
         sshRelay = null
         _ui.update { it.copy(sshOutput = "", sshConnected = false, sshConnecting = false, screen = Screen.Dashboard) }
+    }
+
+    // ─── Channel / DM Creation ───
+
+    fun openCreateChannelSheet() {
+        _ui.update { it.copy(showCreateChannelSheet = true, createChannelError = null) }
+    }
+
+    fun closeCreateChannelSheet() {
+        _ui.update { it.copy(showCreateChannelSheet = false, createChannelError = null) }
+    }
+
+    fun setCreateChannelField(name: String? = null, id: String? = null, pubkey: String? = null) {
+        _ui.update { s -> s.copy(
+            createChannelName = name ?: s.createChannelName,
+            createChannelId = id ?: s.createChannelId,
+            createDmPubkey = pubkey ?: s.createDmPubkey
+        ) }
+    }
+
+    fun createRoom(roomName: String) {
+        val s = _ui.value
+        if (s.serverUrl.isBlank() || s.token.isBlank()) {
+            _ui.update { it.copy(createChannelError = "Нет подключения к серверу") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val api = buildApi(s.serverUrl)
+                val bearer = "Bearer ${s.token}"
+                // Предпроверка trust >= 1 через API (если есть эндпоинт)
+                // Пока отправляем команду напрямую
+                val req = H3363tCommandRequest(command = "create_room", rule = roomName)
+                val resp = api.h3363tCommand(bearer, req)
+                if (resp.success) {
+                    _ui.update { it.copy(showCreateChannelSheet = false, createChannelError = null) }
+                    loadH3363tData()
+                } else {
+                    _ui.update { it.copy(createChannelError = "Ошибка: ${resp.message}") }
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(createChannelError = "Ошибка сети: ${e.message}") }
+            }
+        }
+    }
+
+    fun createDm(pubkey: String) {
+        val s = _ui.value
+        if (s.serverUrl.isBlank() || s.token.isBlank()) {
+            _ui.update { it.copy(createChannelError = "Нет подключения к серверу") }
+            return
+        }
+        // Валидация pubkey: hex 64 символа
+        if (!pubkey.matches(Regex("^[0-9a-fA-F]{64}$"))) {
+            _ui.update { it.copy(createChannelError = "Неверный формат pubkey (должен быть 64 hex символа)") }
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val api = buildApi(s.serverUrl)
+                val bearer = "Bearer ${s.token}"
+                val req = H3363tCommandRequest(command = "create_dm", rule = pubkey)
+                val resp = api.h3363tCommand(bearer, req)
+                if (resp.success) {
+                    _ui.update { it.copy(showCreateChannelSheet = false, createChannelError = null) }
+                    loadH3363tData()
+                } else {
+                    _ui.update { it.copy(createChannelError = "Ошибка: ${resp.message}") }
+                }
+            } catch (e: Exception) {
+                _ui.update { it.copy(createChannelError = "Ошибка сети: ${e.message}") }
+            }
+        }
     }
 
     // ─── Local Settings CRUD ───
@@ -758,9 +878,91 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // ─── mDNS / Nearby Functions ────────────────────────────────────────────────
+
+    fun startNearbyScan() {
+        if (_ui.value.nearbyScanning) return
+        _ui.update { it.copy(nearbyScanning = true, nearbyNodes = emptyList()) }
+
+        val serviceType = "_h3363t._tcp"
+        discoveryListener = object : NsdManager.DiscoveryListener {
+            override fun onDiscoveryStarted(regType: String) {
+                Log.d("H3363T-mDNS", "Discovery started: $regType")
+            }
+            override fun onServiceFound(serviceInfo: NsdServiceInfo) {
+                Log.d("H3363T-mDNS", "Service found: ${serviceInfo.serviceName}")
+                nsdManager.resolveService(serviceInfo, object : NsdManager.ResolveListener {
+                    override fun onResolveFailed(serviceInfo: NsdServiceInfo, errorCode: Int) {
+                        Log.e("H3363T-mDNS", "Resolve failed: $errorCode")
+                    }
+                    override fun onServiceResolved(serviceInfo: NsdServiceInfo) {
+                        val host = serviceInfo.host?.hostAddress ?: return
+                        val port = serviceInfo.port
+                        val name = serviceInfo.serviceName
+                        Log.d("H3363T-mDNS", "Resolved: $name at $host:$port")
+                        _ui.update { currentState ->
+                            val existing = currentState.nearbyNodes.find { it.ip == host && it.port == port }
+                            if (existing == null) {
+                                currentState.copy(nearbyNodes = currentState.nearbyNodes + NearbyNode(name, host, port))
+                            } else currentState
+                        }
+                    }
+                })
+            }
+            override fun onServiceLost(serviceInfo: NsdServiceInfo) {
+                Log.d("H3363T-mDNS", "Service lost: ${serviceInfo.serviceName}")
+                _ui.update { currentState ->
+                    currentState.copy(
+                        nearbyNodes = currentState.nearbyNodes.filterNot {
+                            it.name == serviceInfo.serviceName
+                        }
+                    )
+                }
+            }
+            override fun onDiscoveryStopped(regType: String) {
+                Log.d("H3363T-mDNS", "Discovery stopped: $regType")
+                _ui.update { it.copy(nearbyScanning = false) }
+            }
+            override fun onStartDiscoveryFailed(regType: String, errorCode: Int) {
+                Log.e("H3363T-mDNS", "Start discovery failed: $errorCode")
+                _ui.update { it.copy(nearbyScanning = false) }
+            }
+            override fun onStopDiscoveryFailed(regType: String, errorCode: Int) {
+                Log.e("H3363T-mDNS", "Stop discovery failed: $errorCode")
+                _ui.update { it.copy(nearbyScanning = false) }
+            }
+        }
+
+        try {
+            nsdManager.discoverServices(serviceType, NsdManager.PROTOCOL_DNS_SD, discoveryListener)
+        } catch (e: Exception) {
+            Log.e("H3363T-mDNS", "Discover services error: ${e.message}")
+            _ui.update { it.copy(nearbyScanning = false) }
+        }
+    }
+
+    fun stopNearbyScan() {
+        try {
+            discoveryListener?.let {
+                nsdManager.stopServiceDiscovery(it)
+            }
+        } catch (e: Exception) {
+            Log.e("H3363T-mDNS", "Stop scan error: ${e.message}")
+        }
+        _ui.update { it.copy(nearbyScanning = false) }
+    }
+
+    fun connectToNearbyNode(node: NearbyNode) {
+        val wsUrl = "ws://${node.ip}:${node.port}"
+        Log.d("H3363T-mDNS", "Connecting to nearby node: $wsUrl")
+        localNodeManager.connectTo(wsUrl)
+        navigateTo(Screen.LocalNode)
+    }
+
     override fun onCleared() {
         super.onCleared()
         wsManager?.disconnect()
+        releaseLocks()
         localNodeManager.disconnect()
         sshRelay?.disconnect()
         sshRelay = null

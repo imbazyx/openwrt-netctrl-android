@@ -213,7 +213,7 @@ fun LoginScreen(ui: UiState, onLogin: (String, String, String) -> Unit) {
 }
 
 
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
     var contextMenuAgent by remember { mutableStateOf<AgentFull?>(null) }
@@ -306,12 +306,83 @@ fun RouterListTab(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
 
         // FAB
         FloatingActionButton(
-            onClick = { vm.openAddRouter() },
+            onClick = { vm.openCreateChannelSheet() },
             modifier = Modifier.align(Alignment.BottomEnd).padding(16.dp),
             containerColor = AccentVoid,
             contentColor = Color.White
         ) {
-            Icon(Icons.Default.Add, "Добавить роутер")
+            Icon(Icons.Default.Add, "Создать канал/DM")
+        }
+    }
+
+    // Create Channel/DM BottomSheet
+    if (ui.showCreateChannelSheet) {
+        var tabState by remember { mutableStateOf(0) } // 0=Room, 1=DM
+        ModalBottomSheet(
+            onDismissRequest = { vm.closeCreateChannelSheet() },
+            containerColor = CardBg,
+            contentColor = TextPrimary
+        ) {
+            Column(
+                Modifier.padding(16.dp).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text("Создать", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+
+                // Tabs
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        onClick = { tabState = 0 },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (tabState == 0) AccentVoid else CardBg
+                        )
+                    ) { Text("Комната") }
+                    Button(
+                        onClick = { tabState = 1 },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (tabState == 1) AccentVoid else CardBg
+                        )
+                    ) { Text("Личное сообщение") }
+                }
+
+                if (tabState == 0) {
+                    OutlinedTextField(
+                        value = ui.createChannelName,
+                        onValueChange = { vm.setCreateChannelField(name = it) },
+                        label = { Text("Название комнаты") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = customOutlinedColors(),
+                        singleLine = true
+                    )
+                    Button(
+                        onClick = { vm.createRoom(ui.createChannelName) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = ui.createChannelName.isNotBlank(),
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                    ) { Text("Создать") }
+                } else {
+                    OutlinedTextField(
+                        value = ui.createDmPubkey,
+                        onValueChange = { vm.setCreateChannelField(pubkey = it) },
+                        label = { Text("Pubkey получателя (hex 64 символа)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = customOutlinedColors(),
+                        singleLine = true
+                    )
+                    Button(
+                        onClick = { vm.createDm(ui.createDmPubkey) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = ui.createDmPubkey.length == 64,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentVoid)
+                    ) { Text("Отправить запрос") }
+                }
+
+                if (ui.createChannelError != null) {
+                    Text(ui.createChannelError, color = OfflineRed, fontSize = 13.sp)
+                }
+            }
         }
     }
 
@@ -845,6 +916,12 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
                 actions = {
                     IconButton({ vm.refresh() }) { Icon(Icons.Default.Refresh, null, tint = TextSecondary) }
                     OutlinedButton(
+                        onClick = { vm.openAddRouter() },
+                        modifier = Modifier.padding(end = 4.dp).height(32.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentVoid),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
+                    ) { Text("+ Роутер", fontSize = 12.sp) }
+                    OutlinedButton(
                         onClick = { vm.logout() },
                         modifier = Modifier.padding(end = 8.dp).height(32.dp),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
@@ -867,6 +944,7 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
                 ) {
                     val dashActive = screen is Screen.Dashboard || screen is Screen.AddRouter
                     NavTab("Роутеры", dashActive) { vm.navigateTo(Screen.Dashboard) }
+                    NavTab("Рядом", screen is Screen.Nearby) { vm.navigateTo(Screen.Nearby) }
                     NavTab("Карта", screen is Screen.Map) { vm.navigateTo(Screen.Map) }
                     if (ui.isSuperAdmin) {
                         NavTab("Админ", screen is Screen.Admin) { vm.navigateTo(Screen.Admin) }
@@ -878,6 +956,7 @@ fun MainTabScaffold(ui: UiState, vm: MainViewModel) {
     ) { pad ->
         when (screen) {
             is Screen.Map       -> MapTabContent(ui, vm, pad)
+            is Screen.Nearby    -> NearbyTabContent(ui, vm, pad)
             is Screen.Admin     -> AdminTabContent(ui, vm, pad)
             is Screen.AddRouter -> AddRouterContent(ui, vm, pad)
             else                -> RouterListTab(ui, vm, pad)
@@ -2748,7 +2827,7 @@ fun AgentSettingsScreen(
     }
 }
 
-// ─── NATIVE SSH SCREEN (Termux-style) ────────────────────────────────────────
+// ─── NATIVE SSH SCREEN (Interactive Console) ────────────────────────────────
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -2764,7 +2843,6 @@ fun NativeSshScreen(
     val lazyListState = rememberLazyListState()
     val lines = output.split("\n")
 
-    // Автоскролл вниз при добавлении новых строк
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) {
             lazyListState.animateScrollToItem(lines.size - 1)
@@ -2802,7 +2880,6 @@ fun NativeSshScreen(
                     LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentVoid, trackColor = CardBg)
                 }
 
-                // Terminal Output Area — непрерывный поток строк, без пузырей
                 LazyColumn(
                     state = lazyListState,
                     modifier = Modifier.weight(1f).fillMaxWidth().background(Color.Black).padding(4.dp)
@@ -2819,7 +2896,6 @@ fun NativeSshScreen(
                     }
                 }
 
-                // ЗАДАЧА 4: Ввод буферизуется, отправка по Enter
                 var inputBuffer by remember { mutableStateOf("") }
 
                 Row(
@@ -2848,12 +2924,75 @@ fun NativeSshScreen(
                         keyboardActions = KeyboardActions(
                             onSend = {
                                 if (connected && inputBuffer.isNotEmpty()) {
-                                    vm.sshSend(inputBuffer + "\n")
+                                    vm.sendSshCommand(inputBuffer + "\n")
                                     inputBuffer = ""
                                 }
                             }
                         )
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun NearbyTabContent(ui: UiState, vm: MainViewModel, pad: PaddingValues) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .padding(pad)
+            .background(BgDark)
+    ) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(CardBg)
+                .padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text("Устройства рядом", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            if (ui.nearbyScanning) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp), color = AccentVoid, strokeWidth = 2.dp)
+            } else {
+                OutlinedButton(
+                    onClick = { vm.startNearbyScan() },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentVoid)
+                ) {
+                    Text("Сканировать")
+                }
+            }
+        }
+
+        LazyColumn(Modifier.fillMaxSize()) {
+            items(ui.nearbyNodes) { node ->
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                        .clickable { vm.connectToNearbyNode(node) },
+                    colors = CardDefaults.cardColors(containerColor = CardBg),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(node.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                            Text("${node.ip}:${node.port}", color = TextSecondary, fontSize = 12.sp)
+                        }
+                        Icon(Icons.Default.Wifi, "Connect", tint = AccentVoid)
+                    }
+                }
+            }
+            if (ui.nearbyNodes.isEmpty() && !ui.nearbyScanning) {
+                item {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Нет устройств nearby. Нажмите 'Сканировать'.", color = TextSecondary)
+                    }
                 }
             }
         }

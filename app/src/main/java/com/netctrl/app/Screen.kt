@@ -10,6 +10,7 @@ sealed class Screen(val route: String) {
     object AddRouter  : Screen("add_router")
     object H3363TNode : Screen("h3363t_node")
     object LocalNode  : Screen("local_node")
+    object Nearby     : Screen("nearby")
     object Settings   : Screen("settings")
     data class Detail(val agent: AgentFull)      : Screen("detail/${agent.agent_id}")
     data class SshTerminal(val agent: AgentFull) : Screen("ssh_terminal/${agent.agent_id}")

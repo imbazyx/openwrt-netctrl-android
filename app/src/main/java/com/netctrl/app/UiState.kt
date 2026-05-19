@@ -60,4 +60,20 @@ data class UiState(
     val sshOutput: String = "",
     val sshConnected: Boolean = false,
     val sshConnecting: Boolean = false,
+    // Channel/DM creation BottomSheet
+    val showCreateChannelSheet: Boolean = false,
+    val createChannelName: String = "",
+    val createChannelId: String = "",
+    val createDmPubkey: String = "",
+    val createChannelError: String? = null,
+    // Nearby / mDNS
+    val nearbyNodes: List<NearbyNode> = emptyList(),
+    val nearbyScanning: Boolean = false,
+)
+
+data class NearbyNode(
+    val name: String,
+    val ip: String,
+    val port: Int,
+    val serviceType: String = "_h3363t._tcp"
 )

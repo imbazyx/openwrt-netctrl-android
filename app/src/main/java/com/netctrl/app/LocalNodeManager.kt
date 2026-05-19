@@ -73,9 +73,13 @@ class LocalNodeManager {
     }
 
     fun connect() {
+        connectTo("ws://127.0.0.1:9001")
+    }
+
+    fun connectTo(url: String) {
         disconnect()
         _peerCount.value = 0
-        val request = Request.Builder().url("ws://127.0.0.1:9001").build()
+        val request = Request.Builder().url(url).build()
         webSocket = client.newWebSocket(request, listener)
     }
 
