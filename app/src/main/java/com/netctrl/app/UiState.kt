@@ -60,6 +60,7 @@ data class UiState(
     val sshOutput: String = "",
     val sshConnected: Boolean = false,
     val sshConnecting: Boolean = false,
+    val sshInputBuffer: String = "",
     // Channel/DM creation BottomSheet
     val showCreateChannelSheet: Boolean = false,
     val createChannelName: String = "",

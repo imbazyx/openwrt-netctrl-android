@@ -17,6 +17,8 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.window.navigationBarsPadding
+import androidx.compose.ui.ime.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -2841,97 +2843,219 @@ fun NativeSshScreen(
     val connected = ui.sshConnected
     val connecting = ui.sshConnecting
     val lazyListState = rememberLazyListState()
-    val lines = output.split("\n")
+    val lines = remember(output) { output.split("\n") }
+    val coroutineScope = rememberCoroutineScope()
 
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) {
-            lazyListState.animateScrollToItem(lines.size - 1)
+            coroutineScope.launch {
+                lazyListState.animateScrollToItem(lines.size - 1)
+            }
         }
     }
 
-    MaterialTheme(
-        colorScheme = darkColorScheme(
-            background = Color.Black,
-            surface = Color.Black,
-            onBackground = Color(0xFFE0E0E0),
-            onSurface = Color(0xFFE0E0E0)
-        )
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(BgDark)
+            .imePadding()
+            .navigationBarsPadding()
     ) {
-        Scaffold(
-            topBar = {
-                TopAppBar(
-                    title = {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("SSH — ${agent.display_name ?: agent.agent_id}", color = Color.White)
-                            Box(
-                                Modifier.size(8.dp)
-                                    .background(if (connected) OnlineGreen else OfflineRed, RoundedCornerShape(50))
-                            )
-                        }
-                    },
-                    navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.Default.ArrowBack, null, tint = Color.White) } },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF000000))
-                )
-            },
-            containerColor = Color.Black
-        ) { pad ->
-            Column(Modifier.fillMaxSize().padding(pad)) {
-                if (connecting) {
-                    LinearProgressIndicator(Modifier.fillMaxWidth(), color = AccentVoid, trackColor = CardBg)
-                }
-
-                LazyColumn(
-                    state = lazyListState,
-                    modifier = Modifier.weight(1f).fillMaxWidth().background(Color.Black).padding(4.dp)
-                ) {
-                    items(lines) { line ->
-                        Text(
-                            text = line,
-                            color = Color(0xFFE0E0E0),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)
-                        )
-                    }
-                }
-
-                var inputBuffer by remember { mutableStateOf("") }
-
-                Row(
-                    Modifier.fillMaxWidth().background(Color(0xFF1A1A1A)).padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "# ",
-                        color = Color(0xFF50FA7B),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 13.sp
+        // Статус-бар
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(CardBg)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.ArrowBack, null, tint = TextSecondary)
+            }
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        if (connected) OnlineGreen else if (connecting) AccentVoid else OfflineRed,
+                        CircleShape
                     )
-                    BasicTextField(
-                        value = TextFieldValue(inputBuffer),
-                        onValueChange = { inputBuffer = it.text },
-                        modifier = Modifier.weight(1f),
-                        enabled = connected,
-                        textStyle = TextStyle(
-                            color = Color.White,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp
-                        ),
-                        cursorBrush = SolidColor(Color(0xFF50FA7B)),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                        keyboardActions = KeyboardActions(
-                            onSend = {
-                                if (connected && inputBuffer.isNotEmpty()) {
-                                    vm.sendSshCommand(inputBuffer + "\n")
-                                    inputBuffer = ""
-                                }
-                            }
-                        )
-                    )
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "SSH: ${agent.display_name ?: agent.agent_id}",
+                color = TextPrimary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (connected) {
+                IconButton(onClick = { vm.closeSsh() }) {
+                    Icon(Icons.Default.Close, contentDescription = "Disconnect", tint = TextSecondary)
                 }
             }
+        }
+
+        if (connecting) {
+            LinearProgressIndicator(
+                Modifier.fillMaxWidth(),
+                color = AccentVoid,
+                trackColor = BgDark
+            )
+        }
+
+        // Вывод терминала
+        LazyColumn(
+            state = lazyListState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .background(BgDark)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            reverseLayout = false
+        ) {
+            items(lines) { line ->
+                AnsiText(
+                    text = line,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+
+        // Панель Termux-кнопок
+        TermuxButtonBar(
+            onSend = { vm.sendSshCommand(it) }
+        )
+
+        // Поле ввода
+        TerminalInputField(
+            value = ui.sshInputBuffer,
+            onValueChange = { vm.updateSshInput(it) },
+            onSend = { vm.sendSshCommand(ui.sshInputBuffer + "\n") },
+            enabled = connected
+        )
+    }
+}
+
+@Composable
+fun AnsiText(text: String, modifier: Modifier = Modifier) {
+    val annotated = AnsiParser.parse(text)
+    Text(
+        text = annotated,
+        fontFamily = FontFamily.Monospace,
+        fontSize = 13.sp,
+        lineHeight = 18.sp,
+        modifier = modifier
+    )
+}
+
+@Composable
+fun TermuxButtonBar(
+    onSend: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var ctrlMode by remember { mutableStateOf(false) }
+
+    val buttons = listOf(
+        Triple("ESC", "\u001B", false),
+        Triple("TAB", "\t", false),
+        Triple("↑", "\u001B[A", false),
+        Triple("↓", "\u001B[B", false),
+        Triple("←", "\u001B[D", false),
+        Triple("→", "\u001B[C", false),
+        Triple("CTRL", "", true),
+        Triple("/", "/", false),
+        Triple("|", "|", false),
+        Triple("~", "~", false),
+        Triple("-", "-", false)
+    )
+
+    LazyRow(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0D0B1A))
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        items(buttons) { (label, value, isCtrl) ->
+            val isActive = isCtrl && ctrlMode
+            Button(
+                onClick = {
+                    if (isCtrl) {
+                        ctrlMode = !ctrlMode
+                    } else if (value.isNotEmpty()) {
+                        val send = if (ctrlMode && value.length == 1) {
+                            (value[0].code and 0x1F).toChar().toString()
+                        } else value
+                        onSend(send)
+                        if (ctrlMode) ctrlMode = false
+                    }
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isActive) AccentVoid else Color(0xFF1A1830)
+                ),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                modifier = Modifier.height(32.dp)
+            ) {
+                Text(
+                    text = label,
+                    color = if (isActive) Color.White else TextPrimary,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun TerminalInputField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    onSend: () -> Unit,
+    enabled: Boolean
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF0D0B1A))
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "$ ",
+            color = AccentVoid,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 14.sp
+        )
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            modifier = Modifier.weight(1f),
+            enabled = enabled,
+            textStyle = TextStyle(
+                color = TextPrimary,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 14.sp
+            ),
+            cursorBrush = SolidColor(AccentVoid),
+            keyboardActions = KeyboardActions(
+                onSend = { onSend() }
+            ),
+            keyboardOptions = KeyboardOptions(
+                imeAction = ImeAction.Send
+            ),
+            singleLine = true
+        )
+        IconButton(
+            onClick = onSend,
+            modifier = Modifier.size(36.dp),
+            enabled = enabled
+        ) {
+            Icon(
+                imageVector = Icons.Default.Send,
+                contentDescription = "Send",
+                tint = AccentVoid
+            )
         }
     }
 }

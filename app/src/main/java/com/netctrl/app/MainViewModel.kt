@@ -724,10 +724,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun sendSshCommand(cmd: String) {
-        _ui.update { it.copy(sshOutput = it.sshOutput + cmd + "\n") }
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sshRelay?.send(cmd)
         }
+        _ui.update { it.copy(sshInputBuffer = "") }
+    }
+
+    fun updateSshInput(text: String) {
+        _ui.update { it.copy(sshInputBuffer = text) }
     }
 
     fun closeSsh() {
