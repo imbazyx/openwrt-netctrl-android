@@ -17,8 +17,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.ui.window.navigationBarsPadding
-import androidx.compose.ui.ime.imePadding
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -2858,8 +2860,6 @@ fun NativeSshScreen(
         modifier = Modifier
             .fillMaxSize()
             .background(BgDark)
-            .imePadding()
-            .navigationBarsPadding()
     ) {
         // Статус-бар
         Row(
