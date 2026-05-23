@@ -16,6 +16,9 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -32,6 +35,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -2926,15 +2930,65 @@ fun NativeSshScreen(
             onSend = { vm.sendSshCommand(it) }
         )
 
-        // Поле ввода
-        TerminalInputField(
-            value = ui.sshInputBuffer,
-            onValueChange = { vm.updateSshInput(it) },
+        // Невидимое поле ввода для перехвата IME
+        InvisibleTerminalInput(
             onCharSend = { vm.sendSshChar(it) },
             onSend = { vm.sendSshCommand("\n") },
             enabled = connected
         )
     }
+}
+
+@Composable
+fun InvisibleTerminalInput(
+    onCharSend: (Char) -> Unit,
+    onSend: () -> Unit,
+    enabled: Boolean
+) {
+    var text by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+    val softwareKeyboardController = LocalSoftwareKeyboardController.current
+
+    // Запрашиваем фокус при появлении
+    LaunchedEffect(enabled) {
+        if (enabled) {
+            focusRequester.requestFocus()
+            softwareKeyboardController?.show()
+        }
+    }
+    
+    BasicTextField(
+        value = text,
+        onValueChange = { newValue ->
+            if (newValue.length > text.length) {
+                // Ввод символа
+                val added = newValue.substring(text.length)
+                added.forEach { ch -> onCharSend(ch) }
+            } else if (newValue.length < text.length) {
+                // Удаление
+                repeat(text.length - newValue.length) { onCharSend('\u007F') }
+            }
+            text = newValue
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp) // Достаточная высота для захвата тапов
+            .focusRequester(focusRequester)
+            .clickable { 
+                focusRequester.requestFocus()
+                softwareKeyboardController?.show()
+            },
+        enabled = enabled,
+        textStyle = TextStyle(color = Color.Transparent, fontSize = 1.sp),
+        cursorBrush = SolidColor(Color.Transparent),
+        keyboardActions = KeyboardActions(
+            onSend = { onSend() }
+        ),
+        keyboardOptions = KeyboardOptions(
+            imeAction = ImeAction.Send
+        ),
+        singleLine = true
+    )
 }
 
 @Composable
@@ -3016,6 +3070,9 @@ fun TerminalInputField(
     onSend: () -> Unit,
     enabled: Boolean
 ) {
+    var lastText by remember { mutableStateOf("") }
+    var lastSelection by remember { mutableStateOf(TextRange(0)) }
+
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -3030,14 +3087,35 @@ fun TerminalInputField(
             fontSize = 14.sp
         )
         BasicTextField(
-            value = value,
-            onValueChange = { newValue ->
-                // Отправляем новые символы по одному
-                if (newValue.length > value.length) {
-                    val added = newValue.substring(value.length)
-                    added.forEach { ch -> onCharSend(ch) }
+            value = TextFieldValue(text = value, selection = TextRange(value.length)),
+            onValueChange = { tfv ->
+                val newText = tfv.text
+                val newSel = tfv.selection
+
+                // Обработка ввода/удаления текста
+                if (newText.length != lastText.length) {
+                    if (newText.length > lastText.length) {
+                        // Вставка символов
+                        val start = minOf(newSel.start, newText.length)
+                        val end = maxOf(0, start - (newText.length - lastText.length))
+                        // Отправляем только что вставленные символы
+                        // Упрощённо: отправляем все новые символы
+                        val diff = newText.substring(lastText.length.coerceAtMost(newText.length))
+                        diff.forEach { ch -> onCharSend(ch) }
+                    } else {
+                        // Удаление — отправляем DEL (\x7F), стандарт для bash/zsh
+                        val count = lastText.length - newText.length
+                        repeat(count) { onCharSend('\u007F') }
+                    }
                 }
-                onValueChange(newValue)
+
+                // Обработка перемещения курсора (если текст не изменился, но позиция курсора изменилась)
+                // Это сложная часть: нужно отслеживать направление движения
+                // Для простоты пока пропускаем, используем Termux-кнопки для навигации
+
+                lastText = newText
+                lastSelection = newSel
+                onValueChange(newText)
             },
             modifier = Modifier.weight(1f),
             enabled = enabled,
