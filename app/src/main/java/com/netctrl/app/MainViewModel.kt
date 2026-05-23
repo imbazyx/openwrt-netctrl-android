@@ -723,6 +723,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun sendSshChar(ch: Char) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            sshRelay?.send(ch.toString())
+        }
+    }
+
     fun sendSshCommand(cmd: String) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             sshRelay?.send(cmd)

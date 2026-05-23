@@ -2930,7 +2930,8 @@ fun NativeSshScreen(
         TerminalInputField(
             value = ui.sshInputBuffer,
             onValueChange = { vm.updateSshInput(it) },
-            onSend = { vm.sendSshCommand(ui.sshInputBuffer + "\n") },
+            onCharSend = { vm.sendSshChar(it) },
+            onSend = { vm.sendSshCommand("\n") },
             enabled = connected
         )
     }
@@ -3011,6 +3012,7 @@ fun TermuxButtonBar(
 fun TerminalInputField(
     value: String,
     onValueChange: (String) -> Unit,
+    onCharSend: (Char) -> Unit,
     onSend: () -> Unit,
     enabled: Boolean
 ) {
@@ -3029,7 +3031,14 @@ fun TerminalInputField(
         )
         BasicTextField(
             value = value,
-            onValueChange = onValueChange,
+            onValueChange = { newValue ->
+                // Отправляем новые символы по одному
+                if (newValue.length > value.length) {
+                    val added = newValue.substring(value.length)
+                    added.forEach { ch -> onCharSend(ch) }
+                }
+                onValueChange(newValue)
+            },
             modifier = Modifier.weight(1f),
             enabled = enabled,
             textStyle = TextStyle(
