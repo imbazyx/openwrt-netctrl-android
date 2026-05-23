@@ -5,17 +5,29 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 
 class CredentialStore(context: Context) {
-    private val masterKey = MasterKey.Builder(context)
-        .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-        .build()
+    private val prefs = createEncryptedPrefs(context)
 
-    private val prefs = EncryptedSharedPreferences.create(
-        context,
-        "netctrl_creds_v1",
-        masterKey,
-        EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-        EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-    )
+    private fun createEncryptedPrefs(context: Context): android.content.SharedPreferences {
+        return try {
+            val masterKey = MasterKey.Builder(context)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+            EncryptedSharedPreferences.create(
+                context,
+                "netctrl_creds_v1",
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (e: Exception) {
+            // Файл повреждён (смена APK подписи) — удаляем и пересоздаём
+            android.util.Log.w("CredentialStore",
+                "Encrypted prefs corrupted, resetting: ${e.message}")
+            context.deleteSharedPreferences("netctrl_creds_v1")
+            // Рекурсивный вызов — теперь создаст чистый файл
+            createEncryptedPrefs(context)
+        }
+    }
 
     fun saveSsh(agentId: String, login: String, password: String) {
         prefs.edit()
