@@ -700,7 +700,19 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     url = wsUrl,
                     onOutput = { text ->
                         kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.Main) {
-                            _ui.update { it.copy(sshOutput = it.sshOutput + text) }
+                            _ui.update { state ->
+                                // First strip all ANSI escape sequences
+                                var cleaned = text.replace(Regex("\u001B\\[[0-9;]*[A-Za-z]"), "")
+                                // Then process BS and DEL
+                                var out = state.sshOutput
+                                for (ch in cleaned) {
+                                    when (ch) {
+                                        '\b', '\u007F' -> if (out.isNotEmpty()) out = out.dropLast(1)
+                                        else -> out += ch
+                                    }
+                                }
+                                state.copy(sshOutput = out)
+                            }
                         }
                     },
                     onConnected = {
@@ -727,7 +739,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun sendSshChar(ch: Char) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            sshRelay?.send(ch.toString())
+            when (ch) {
+                '\b', '\u007F' -> sshRelay?.send("__BS__") // backspace marker
+                else -> sshRelay?.send(ch.toString())
+            }
         }
     }
 
@@ -1016,6 +1031,11 @@ class SshRelayManager {
     }
 
     fun send(text: String): Boolean = ws?.send(text) ?: false
+
+    fun sendBinary(data: ByteArray): Boolean {
+        val bs = okio.ByteString.of(*data)
+        return ws?.send(bs) ?: false
+    }
 
     fun disconnect() {
         ws?.close(1000, "User closed")
