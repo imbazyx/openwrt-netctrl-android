@@ -307,7 +307,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val s = _ui.value
             try {
-                val metrics = buildApi(s.serverUrl).metrics(agentId, "Bearer ${s.token}", 100)
+                val bearer = if (s.token.isNotBlank()) "Bearer ${s.token}" else ""
+                val metrics = buildApi(s.serverUrl).metrics(agentId, bearer, 100)
                     .data ?: emptyList()
                 _ui.update { it.copy(detailMetrics = metrics) }
             } catch (_: Exception) {}
@@ -568,13 +569,14 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadMetrics(agentId: String, hours: Int = 1) {
         val s = _ui.value
-        if (s.serverUrl.isBlank() || s.token.isBlank() || agentId.isBlank()) return
+        if (s.serverUrl.isBlank() || agentId.isBlank()) return
         viewModelScope.launch {
             _ui.update { it.copy(metricsLoading = true, selectedMetricsAgentId = agentId) }
             try {
                 val limit = hours * 60
+                val bearer = if (s.token.isNotBlank()) "Bearer ${s.token}" else ""
                 val metrics = buildApi(s.serverUrl)
-                    .metrics(agentId, "Bearer ${s.token}", limit)
+                    .metrics(agentId, bearer, limit)
                     .data ?: emptyList()
                 _ui.update { it.copy(detailMetrics = metrics, metricsLoading = false) }
             } catch (_: Exception) {
