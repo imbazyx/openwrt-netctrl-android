@@ -9,22 +9,21 @@ import kotlinx.coroutines.flow.map
 
 val Context.dataStore by preferencesDataStore(name = "netctrl_prefs")
 
-object PrefKeys {
+private object Keys {
     val TOKEN = stringPreferencesKey("token")
     val SERVER_URL = stringPreferencesKey("server_url")
-    val USERNAME = stringPreferencesKey("username")
 }
 
 class Prefs(private val ctx: Context) {
-    val token: Flow<String?> = ctx.dataStore.data.map { it[PrefKeys.TOKEN] }
-    val serverUrl: Flow<String?> = ctx.dataStore.data.map { it[PrefKeys.SERVER_URL] }
-    val username: Flow<String?> = ctx.dataStore.data.map { it[PrefKeys.USERNAME] }
+    /** token to serverUrl */
+    val session: Flow<Pair<String?, String?>> = ctx.dataStore.data.map {
+        it[Keys.TOKEN] to it[Keys.SERVER_URL]
+    }
 
-    suspend fun save(token: String, url: String, username: String) {
+    suspend fun save(token: String, url: String) {
         ctx.dataStore.edit {
-            it[PrefKeys.TOKEN] = token
-            it[PrefKeys.SERVER_URL] = url
-            it[PrefKeys.USERNAME] = username
+            it[Keys.TOKEN] = token
+            it[Keys.SERVER_URL] = url
         }
     }
 

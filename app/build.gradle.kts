@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -16,25 +18,30 @@ android {
     }
 
     signingConfigs {
+        // Кystore берём из keystore.properties или из KEYSTORE_PASS.
+        // Если его нет — релиз просто собирается без подписи, а не падает.
         create("release") {
-            storeFile = file("/home/dim/project/netctrl-android/netctrl-release.jks")
-            storePassword = System.getenv("KEYSTORE_PASS")
-            keyAlias = "netctrl"
-            keyPassword = System.getenv("KEYSTORE_PASS")
+            val props = Properties()
+            val f = rootProject.file("keystore.properties")
+            if (f.exists()) f.inputStream().use { props.load(it) }
+            val pass = props.getProperty("storePassword")
+                ?: System.getenv("KEYSTORE_PASS")
+            val store = props.getProperty("storeFile")
+            if (pass != null && store != null && rootProject.file(store).exists()) {
+                storeFile = rootProject.file(store)
+                storePassword = pass
+                keyAlias = props.getProperty("keyAlias") ?: "netctrl"
+                keyPassword = props.getProperty("keyPassword") ?: pass
+            }
         }
     }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("release")
-        }
-    }
-    applicationVariants.all {
-        val variant = this
-        variant.outputs.all {
-            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            if (variant.buildType.name == "release") {
-                output.outputFileName = "OpenWRT-NetCtrl-v${variant.versionName}.apk"
+            // подписываем только если keystore реально найден
+            if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
             }
         }
     }
@@ -58,19 +65,13 @@ android {
 }
 
 dependencies {
-    val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
-    implementation(composeBom)
+    implementation(platform("androidx.compose:compose-bom:2024.06.00"))
 
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.activity:activity-compose:1.9.0")
-    implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.2")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-    implementation("com.squareup.retrofit2:retrofit:2.11.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.11.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
-    implementation("androidx.work:work-runtime-ktx:2.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

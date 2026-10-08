@@ -5,11 +5,8 @@ build/
 
 # Android secrets
 local.properties
+keystore.properties
 *.jks
 *.keystore
-keystore.properties
 
-# Binary server/agent files (в Releases, не в репо)
-owm-agent-*
-owm-server-*
 ico.png
