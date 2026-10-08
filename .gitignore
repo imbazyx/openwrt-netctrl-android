@@ -3,10 +3,6 @@ app/build/
 build/
 .gradle/
 
-# Собранные APK — артефакт сборки, в репозитории ему не место
-# (релиз лежит в GitHub Releases)
-apk/
-
 # Android secrets
 local.properties
 keystore.properties
