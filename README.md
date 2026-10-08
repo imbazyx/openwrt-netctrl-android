@@ -93,18 +93,34 @@ keyPassword=...
 ## 🔧 Сборка
 
 ```bash
-# отладочная
+# отладочная — APK подписан debug-ключом, ставится сразу
 ./gradlew :app:assembleDebug
 
 # релизная (подпишется, если есть keystore.properties)
 ./gradlew :app:assembleRelease
-
-# APK
-app/build/outputs/apk/release/app-release.apk
 ```
 
 Требуется JDK 17 и Android SDK 34. Путь к SDK — в `local.properties`
 (`sdk.dir=...`, прямые слэши, не обратные).
+
+Имя файла зависит от подписи:
+
+| Сборка | Файл |
+|---|---|
+| debug | `app/build/outputs/apk/debug/app-debug.apk` |
+| release с keystore | `app/build/outputs/apk/release/app-release.apk` |
+| release без keystore | `app/build/outputs/apk/release/app-release-unsigned.apk` |
+
+Без подписи APK ставится на телефон только через `adb install`, из магазина и
+обновлением поверх ранее установленного — нет. Подписать можно отдельно:
+
+```bash
+$ANDROID_HOME/build-tools/34.0.0/zipalign -f 4 in.apk aligned.apk
+$ANDROID_HOME/build-tools/34.0.0/apksigner sign \
+  --ks netctrl-release.jks --out app-release.apk aligned.apk
+```
+
+На Windows wrapper — `gradlew.bat`, он теперь есть в репозитории.
 
 ---
 
@@ -120,6 +136,18 @@ app/build/outputs/apk/release/app-release.apk
 
 Зависимости минимальные: ни Retrofit, ни GSON, ни навигации — всё, что нужно
 для одного запроса логина и одного WebView.
+
+---
+
+## 📦 Готовая сборка
+
+[v1.1.0](https://github.com/imbazyx/openwrt-netctrl-android/releases/tag/v1.1.0)
+— [`netctrl-1.1.0.apk`](https://github.com/imbazyx/openwrt-netctrl-android/releases/download/v1.1.0/netctrl-1.1.0.apk)
+
+Собрана и проверена: `assembleDebug` и `assembleRelease` проходят, подпись
+APK Signature Scheme v2/v3 валидна. Ключ подписи — самоподписанный, лежит
+только локально и в репозиторий не попадает, так что обновить приложение
+поверх чужой подписи не получится.
 
 ---
 
