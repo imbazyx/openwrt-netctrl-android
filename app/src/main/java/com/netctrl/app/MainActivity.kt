@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Bundle
 import android.view.ViewGroup
+import android.webkit.ValueCallback
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.ComponentActivity
@@ -253,7 +254,7 @@ private class PanelClient(
         // 2) забрать токен обратно — в панели его можно сменить
         view.evaluateJavascript(
             "sessionStorage.getItem('authToken')",
-            WebView.ValueCallback { value ->
+            ValueCallback { value ->
                 val v = value?.trim('"')
                 if (!v.isNullOrBlank() && v != token) {
                     token = v
